@@ -23,6 +23,7 @@ namespace SoRLargerText
         private static Type uiTextType;
         private static Type tkTextType;
         private static PropertyInfo uiFontSize;
+        private static PropertyInfo uiBestFit;
         private static PropertyInfo tkScale;
         private static readonly ConditionalWeakTable<Component, TextState> states =
             new ConditionalWeakTable<Component, TextState>();
@@ -40,6 +41,8 @@ namespace SoRLargerText
             public Vector3 AppliedTk;
             public bool HasFont;
             public bool HasTk;
+            public bool HasBestFit;
+            public bool OriginalBestFit;
         }
 
         private void Awake()
@@ -77,6 +80,7 @@ namespace SoRLargerText
 
                 if (uiTextType != null)
                 {
+                    uiBestFit = uiTextType.GetProperty("resizeTextForBestFit", BindingFlags.Instance | BindingFlags.Public);
                     uiFontSize = uiTextType.GetProperty("fontSize",
                         BindingFlags.Instance | BindingFlags.Public);
                     MethodInfo setter = uiFontSize != null ? uiFontSize.GetSetMethod() : null;
@@ -106,7 +110,7 @@ namespace SoRLargerText
                     }
                 }
 
-                if (tkTextType != null)
+                if (enableTk2d.Value && tkTextType != null)
                 {
                     tkScale = tkTextType.GetProperty("scale",
                         BindingFlags.Public | BindingFlags.Instance);
@@ -150,15 +154,15 @@ namespace SoRLargerText
             if (component != null) instance.ResizeUi(component, null);
         }
 
-        private static void FontSizePrefix(object __instance, int value)
+        private static void FontSizePrefix(object __instance, int __0)
         {
             if (writingFont || instance == null || __instance == null) return;
             Component component = __instance as Component;
             if (component == null) return;
             TextState state = states.GetOrCreateValue(component);
-            if (!state.HasFont || Math.Abs(value - state.AppliedFont) > 0.01f)
+            if (!state.HasFont || Math.Abs(__0 - state.AppliedFont) > 0.01f)
             {
-                state.BaselineFont = value;
+                state.BaselineFont = __0;
                 state.HasFont = true;
             }
         }
@@ -182,6 +186,15 @@ namespace SoRLargerText
                     state.BaselineFont = current;
                     state.AppliedFont = current;
                     state.HasFont = true;
+                    if (uiBestFit != null && uiBestFit.CanRead && uiBestFit.CanWrite)
+                    {
+                        try
+                        {
+                            state.OriginalBestFit = (bool)uiBestFit.GetValue(component, null);
+                            state.HasBestFit = true;
+                        }
+                        catch { state.HasBestFit = false; }
+                    }
                 }
                 float size = state.BaselineFont;
                 bool eligible = enabled.Value &&
@@ -189,9 +202,23 @@ namespace SoRLargerText
                     size < maxOriginalSize.Value &&
                     !IsTitleOrButton(component) &&
                     GetVisualSize(size, component.transform) < maxVisualPx.Value;
-                float wanted = eligible
-                    ? (float)Math.Round(size * Mathf.Clamp(zoom.Value, 1f, 2f))
-                    : size;
+                float originalVisual = GetVisualSize(size, component.transform);
+                float factor = eligible
+                    ? Mathf.Min(Mathf.Clamp(zoom.Value, 1f, 2f), maxVisualPx.Value / originalVisual)
+                    : 1f;
+                float wanted = eligible ? (float)Math.Round(size * factor) : size;
+                // Best Fit can silently shrink text back to its old rendered size.
+                // Restore its original state whenever a label is not enlarged.
+                if (state.HasBestFit && uiBestFit != null)
+                {
+                    try
+                    {
+                        bool bestFit = state.OriginalBestFit && !(eligible && factor > 1.001f);
+                        if ((bool)uiBestFit.GetValue(component, null) != bestFit)
+                            uiBestFit.SetValue(component, bestFit, null);
+                    }
+                    catch { }
+                }
                 if (eligible && trace.Value && Math.Abs(state.AppliedFont - wanted) > 0.01f)
                     Logger.LogInfo("Text enlarged: " + component.name +
                         " original=" + size + " new=" + wanted);
@@ -235,15 +262,15 @@ namespace SoRLargerText
             return false;
         }
 
-        private static void TkScalePrefix(object __instance, Vector3 value)
+        private static void TkScalePrefix(object __instance, Vector3 __0)
         {
             if (writingTk || instance == null || __instance == null) return;
             Component c = __instance as Component;
             if (c == null) return;
             TextState s = states.GetOrCreateValue(c);
-            if (!s.HasTk || (value - s.AppliedTk).sqrMagnitude > 0.000001f)
+            if (!s.HasTk || (__0 - s.AppliedTk).sqrMagnitude > 0.000001f)
             {
-                s.BaselineTk = value;
+                s.BaselineTk = __0;
                 s.HasTk = true;
             }
         }
