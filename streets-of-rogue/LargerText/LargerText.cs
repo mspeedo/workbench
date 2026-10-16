@@ -31,6 +31,7 @@ namespace SoRLargerText
         private bool dirty;
         private bool handling;
         private bool hooksInstalled;
+        private bool installing;
         private bool listenersInstalled;
         private int revision;
         private ConfigEntry<bool> enabled, protectHeadings, logging;
@@ -79,7 +80,8 @@ namespace SoRLargerText
 
         private void TryInstallHooks()
         {
-            if (hooksInstalled) return;
+            if (hooksInstalled || installing) return;
+            installing = true;
             try
             {
                 uiType = Type.GetType("UnityEngine.UI.Text, UnityEngine.UI", false);
@@ -137,6 +139,7 @@ namespace SoRLargerText
             {
                 Logger.LogError("Larger Text: unable to install text hooks: " + ex);
             }
+            finally { installing = false; }
         }
 
         private static void AfterPopulateMesh(object __instance)
