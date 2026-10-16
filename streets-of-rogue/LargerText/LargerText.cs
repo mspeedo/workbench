@@ -148,8 +148,14 @@ namespace SoRLargerText
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            // Forget destroyed/previous-scene objects; do not retain references.
-            known.Clear();
+            // Keep original-size records for DontDestroyOnLoad UI. Clearing
+            // them would cause persistent labels to grow again every level.
+            var destroyed = new List<int>();
+            foreach (var pair in known)
+                if (pair.Value.Component == null)
+                    destroyed.Add(pair.Key);
+            foreach (int id in destroyed)
+                known.Remove(id);
             StartCoroutine(ScanAfterSceneLoad());
         }
 
