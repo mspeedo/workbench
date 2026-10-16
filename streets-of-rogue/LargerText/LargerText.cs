@@ -14,7 +14,7 @@ namespace SoRLargerText
     /// percentile, so headings cannot become "small" just because another giant
     /// text element entered the scene.
     /// </summary>
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "1.1.0")]
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "1.1.1")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private static Plugin instance;
@@ -49,8 +49,8 @@ namespace SoRLargerText
         {
             instance = this;
             enabled = Config.Bind("General", "Enabled", true, "Enable smaller-text enlargement.");
-            zoom = Config.Bind("General", "Multiplier", 1.50f,
-                "Enlarge eligible small text by up to 1.5x.");
+            zoom = Config.Bind("General", "Multiplier", 1.35f,
+                "Enlarge eligible small text by up to 1.35x.");
             maxVisualPx = Config.Bind("General", "MaxVisualFontSize", 25f,
                 "Only resize text with original size strictly below this estimated onscreen size.");
             maxOriginalSize = Config.Bind("General", "MaxOriginalFontSize", 40,
@@ -135,7 +135,7 @@ namespace SoRLargerText
                         patched++;
                     }
                 }
-                Logger.LogInfo("Larger Text 1.1 loaded: " + patched +
+                Logger.LogInfo("Larger Text 1.1.1 loaded: " + patched +
                     " lifecycle/property hooks; no scan, no overlay, no settings migration.");
                 if (patched == 0)
                     Logger.LogWarning("No supported UI text hooks found; please send BepInEx/LogOutput.log.");
