@@ -241,6 +241,23 @@ namespace SoRLargerText
                 }
                 finally { internalWrite = false; }
                 entry.AppliedFont = wantedFont;
+                // Unity's Best Fit can immediately shrink text back to the
+                // original visual size even after fontSize increases.
+                // For a "scale every text" mod, disable that auto-shrink.
+                if (uiTextType != null && uiTextType.IsInstanceOfType(component))
+                {
+                    PropertyInfo bestFit = type.GetProperty("resizeTextForBestFit", Props);
+                    if (bestFit != null && bestFit.CanRead && bestFit.CanWrite &&
+                        bestFit.PropertyType == typeof(bool))
+                    {
+                        try
+                        {
+                            if ((bool)bestFit.GetValue(component, null))
+                                bestFit.SetValue(component, false, null);
+                        }
+                        catch { }
+                    }
+                }
                 return true;
             }
             catch (Exception ex)
