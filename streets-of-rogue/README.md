@@ -4,10 +4,10 @@ Two independent plugins for the original *Streets of Rogue*, intended for Window
 
 ## LargerText v1.2.0
 
-**Fixes the v1.1.x regression where smaller fonts no longer enlarged.** In v1.1, guessed hard cutoffs for font size excluded the real UI labels; property setter / enable hooks could also miss initially rendered labels. v1.2 instead hooks **UnityEngine.UI.Text.OnPopulateMesh** so actual text geometry creation registers each label.
+**Fixes the v1.1.x regression where smaller fonts no longer enlarged.** In v1.1, guessed hard cutoffs for font size excluded the real UI labels; property setter / enable hooks could also miss initially rendered labels. v1.2 instead hooks **UnityEngine.UI.Text.OnPopulateMesh** so actual text geometry creation registers each label. The UI assembly can load after BepInEx startup, so hook installation also listens for assembly loading rather than assuming it is already present.
 
 - Default **Multiplier = 1.35** (35% enlargement).
-- Enlarge only text smaller than **72% of the reference text** within the same Unity Canvas, calculated using originally rendered font-size × transform scale.
+- Enlarge only text smaller than **78% of the reference text** within the same Unity Canvas, calculated using originally rendered font-size × transform scale.
 - The reference is the 85th percentile of the observed Canvas text sizes. This means the largest text is above the cutoff and is not modified. Headings, buttons, titles, logos, big messages are protected by object names as a second guard.
 - **No 0.5-second scene scans:** no `Update()`, `OnGUI()`, or `Resources.FindObjectsOfTypeAll()`. Text appearance or size changes set a dirty flag; a lightweight `Canvas.willRenderCanvases` listener processes **only registered text components when dirty**. No periodic full-game enumeration.
 - **No configuration migrations.** BepInEx keeps older values; obsolete options are ignored.
