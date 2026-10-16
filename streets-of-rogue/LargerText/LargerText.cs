@@ -10,11 +10,12 @@ using UnityEngine.SceneManagement;
 
 namespace SoRLargerText
 {
-    // Small extension of the known-working v2.0 implementation:
-    // multiply text by 1.2 unless it's an obviously large label.
+    // v2.2: retain v2.0's working initialization/scan mechanism.
+    // Never override Unity's Best Fit, and prevent any UI font increase
+    // that would overflow the text rectangle.
     // Determine large-size tiers once at scene load (not periodically).
     // No startup settings migrations, overlay or repeated scans.
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.1.0")]
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.2.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private static readonly BindingFlags Props =
@@ -27,6 +28,7 @@ namespace SoRLargerText
         private ConfigEntry<bool> enabled;
         private ConfigEntry<float> multiplier;
         private ConfigEntry<bool> protectLargeText;
+        private ConfigEntry<bool> safeFit;
         // Separate thresholds for each renderer: tk2d scale cannot be
         // meaningfully compared to a Unity UI fontSize.
         private readonly Dictionary<string, float> largeSizeCutoffs =
@@ -55,6 +57,8 @@ namespace SoRLargerText
                 "Enlarge eligible text by 20 percent (1.2x).");
             protectLargeText = Config.Bind("General", "ProtectLargeText", true,
                 "Keep the biggest text and obvious titles/headings at their original sizes.");
+            safeFit = Config.Bind("General", "PreventTextClipping", true,
+                "Keep original font size if enlargement overflows the Unity UI text rectangle.");
             // No settings migrations or writes. Existing Multiplier value is honored.
             harmony = new Harmony("mspeedo.sor.larger-text");
 
@@ -62,7 +66,7 @@ namespace SoRLargerText
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
             DiscoverRenderersAndHooks();
             StartCoroutine(ScanAfterSceneLoad());
-            Logger.LogInfo("Larger Text v2.1 loaded: zoom " + multiplier.Value.ToString("F2") +
+            Logger.LogInfo("Larger Text v2.2 loaded: zoom " + multiplier.Value.ToString("F2") +
                            "x; large-text protection " + protectLargeText.Value +
                            "; one scene scan, no periodic polling.");
         }
@@ -309,28 +313,78 @@ namespace SoRLargerText
                     }
                     finally { internalWrite = false; }
                 }
-                entry.AppliedFont = wantedFont;
-                // Best Fit can undo an enlargement. Preserve the original
-                // value for protected labels (and if protection is toggled).
-                if (entry.HasBestFit)
+
+                // Never switch off resizeTextForBestFit! Doing that caused
+                // long dialogue and mutator labels to disappear. If the game
+                // originally used Best Fit, leave it in charge of layout.
+                if (entry.HasBestFit && entry.OriginalBestFit)
                 {
                     PropertyInfo bestFit = type.GetProperty("resizeTextForBestFit", Props);
-                    if (bestFit != null && bestFit.CanWrite)
+                    if (bestFit != null && bestFit.CanRead && bestFit.CanWrite)
                     {
                         try
                         {
-                            bool desiredFit = zoom == 1f && entry.OriginalBestFit;
-                            if ((bool)bestFit.GetValue(component, null) != desiredFit)
-                                bestFit.SetValue(component, desiredFit, null);
+                            if (!(bool)bestFit.GetValue(component, null))
+                                bestFit.SetValue(component, true, null);
                         }
                         catch { }
                     }
                 }
+
+                if (changed && zoom > 1f && safeFit.Value &&
+                    uiTextType != null && uiTextType.IsInstanceOfType(component) &&
+                    WouldClipText(component, type))
+                {
+                    // A bigger text mesh would not fit its RectTransform.
+                    // Restore the game's actual original size instead of
+                    // risking a completely invisible label.
+                    float fallback = entry.OriginalFont;
+                    internalWrite = true;
+                    try
+                    {
+                        property.SetValue(component,
+                            property.PropertyType == typeof(int)
+                                ? (object)(int)Math.Round(fallback) : fallback, null);
+                    }
+                    finally { internalWrite = false; }
+                    wantedFont = fallback;
+                    changed = false;
+                }
+
+                entry.AppliedFont = wantedFont;
                 return changed;
             }
             catch (Exception ex)
             {
                 Logger.LogDebug("Text adjust " + component.name + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool WouldClipText(Component component, Type type)
+        {
+            try
+            {
+                var rect = component.transform as RectTransform;
+                if (rect == null) return false;
+                float available = rect.rect.height;
+                if (available <= 1f) return false; // Layout hasn't settled yet.
+
+                var textProperty = type.GetProperty("text", Props);
+                string text = textProperty != null ? textProperty.GetValue(component, null) as string : null;
+                if (string.IsNullOrEmpty(text)) return false;
+
+                // Unity's preferredHeight is computed using the real text,
+                // font and wrapping settings, in RectTransform units.
+                PropertyInfo heightProperty = type.GetProperty("preferredHeight", Props);
+                if (heightProperty == null || !heightProperty.CanRead) return false;
+                float preferred = Convert.ToSingle(heightProperty.GetValue(component, null));
+                if (float.IsInfinity(preferred) || float.IsNaN(preferred)) return false;
+                return preferred > available + 0.5f;
+            }
+            catch (Exception e)
+            {
+                Logger.LogDebug("Fit check: " + e.Message);
                 return false;
             }
         }
