@@ -1,37 +1,30 @@
-# Streets of Rogue — BepInEx 5 mods
+# Streets of Rogue 1 — BepInEx 5 quality-of-life plugins
 
-Two independent plugins for the original *Streets of Rogue* (Windows, or SteamOS running the Windows game under Proton).
+Two independent plugins for the original *Streets of Rogue*, intended for Windows or SteamOS under Proton.
 
-## LargerText v1.1.1 — event-driven small fonts
+## LargerText v1.2.0
 
-This replaces the v1.0 adaptive percentile model. V1.0 could enlarge even the largest heading when a still larger font appeared elsewhere. It also scanned every active text component every 0.5 seconds and caused stutters on the handheld.
+**Fixes the v1.1.x regression where smaller fonts no longer enlarged.** In v1.1, guessed hard cutoffs for font size excluded the real UI labels; property setter / enable hooks could also miss initially rendered labels. v1.2 instead hooks **UnityEngine.UI.Text.OnPopulateMesh** so actual text geometry creation registers each label.
 
-**v1.1 changes:**
+- Default **Multiplier = 1.35** (35% enlargement).
+- Enlarge only text smaller than **72% of the reference text** within the same Unity Canvas, calculated using originally rendered font-size × transform scale.
+- The reference is the 85th percentile of the observed Canvas text sizes. This means the largest text is above the cutoff and is not modified. Headings, buttons, titles, logos, big messages are protected by object names as a second guard.
+- **No 0.5-second scene scans:** no `Update()`, `OnGUI()`, or `Resources.FindObjectsOfTypeAll()`. Text appearance or size changes set a dirty flag; a lightweight `Canvas.willRenderCanvases` listener processes **only registered text components when dirty**. No periodic full-game enumeration.
+- **No configuration migrations.** BepInEx keeps older values; obsolete options are ignored.
+- Diagnostics are off by default. Optional `[Diagnostics] LogResizes = true` records actual changes.
+- In v1.2 the supported production text system is `UnityEngine.UI.Text`, which is present throughout this version of Streets of Rogue. No tk2d scaling is enabled.
 
-- **No recurring scene scan.** No `Update()`, no `Resources.FindObjectsOfTypeAll`, no overlay, no periodic diagnostic logging. Harmony subscribes to Unity UI text enabling and changes to its `fontSize` setter. Only an affected text element is processed when it appears or changes font size.
-- **Stable absolute size safeguards:** only font sizes below BOTH `MaxOriginalFontSize` (default 40) AND `MaxVisualFontSize` (default 25 approximate screen pixels) are eligible. Titles, headings, buttons, logos and big text objects are explicitly excluded by name. Enlarged text is capped at the visual size bound.
-- **Zoom default 1.35x** (`Multiplier=1.35`). Dynamic reference percentiles are removed.
-- BepInEx's Unity UI Best Fit sizing is disabled only for enlarged small text, and restored when not enlarged.
-- Legacy `tk2dTextMesh` can be enabled for experiments, but is **off by default** because tk2d's coordinate scaling differs from Unity UI.
-- **No one-time settings migration.** Code does not read or write `SettingsVersion`, and never rewrites your old configuration values during startup.
+### Install
 
-### Installation
+Copy `LargerText.dll` to `<game>/BepInEx/plugins/`, replacing the previous DLL. **Before starting, remove `<game>/BepInEx/config/mspeedo.sor.larger-text.cfg` to load the new settings without any migration.** If keeping the old config, manually ensure `[General] Multiplier = 1.35` and `Enabled = true`; v1.1's old absolute text-size cutoff settings will be ignored.
 
-Copy `LargerText.dll` to `<game>/BepInEx/plugins/`, replacing the previous DLL.
+Look for `Larger Text v1.2.0 active` in `BepInEx/LogOutput.log`.
 
-**Important when upgrading from v0.4 or v1.0:** BepInEx persists old settings. Close the game, delete only `<game>/BepInEx/config/mspeedo.sor.larger-text.cfg` and start it again **if you want the new defaults**. Alternately, retain the file and edit `[General] Multiplier = 1.35`. Obsolete values such as `SmallTextFraction`, `ShowOverlay`, `ForceAllText`, and `SettingsVersion` are ignored, not migrated.
+**Status:** Successfully compiling is not the same as passing an in-game test. Please check small tooltips and regular-sized menu headings separately. If labels still do not change, send the plugin's startup line and a short log sample.
 
-If small text remains unchanged, try raising `MaxVisualFontSize` from 25 to 30 in the config; avoid raising it excessively because that could affect headings. The filter also blocks font sizes originally 40 or larger; names containing `title`, `header`, `heading`, `logo`, `bigtext`, `largetext`, `bigmessage`, or `button` in the first three ancestor objects are protected. Legacy tk2d support is optional and has no polling.
+## UnlimitedRetries v0.2.0 (unchanged)
 
-### Diagnostics
-
-Check `BepInEx/LogOutput.log` for a single `Larger Text 1.1 loaded:` line showing patch count. Set `LogEligibleText=true` to log resized text at property change / activation events. The diagnostic overlay from v0.4 is intentionally removed.
-
-This version is compiled but needs in-game validation for the exact game's UI sizes and lifecycle hooks.
-
-## UnlimitedRetries v0.2 — unchanged
-
-Enables effectively unlimited retries through the game's built-in **Continue?** mutator by replenishing its active continues counter. Requires the mutator, does not add a manual restart option.
+Uses the game's built-in **Continue?** mutator to replenish `SessionData.continues` so a run can retry the current floor effectively indefinitely. Requires Continue? to be active. No manual restart-floor option is implemented.
 
 ## Build
 
@@ -40,4 +33,4 @@ dotnet build streets-of-rogue/LargerText/LargerText.csproj -c Release
 dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj -c Release
 ```
 
-GitHub Actions compiles against public reference packages and creates installable plugin DLLs, without committing proprietary game DLLs.
+GitHub Actions produces DLLs in a ZIP using public reference packages and does not publish game DLLs.
