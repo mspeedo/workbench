@@ -1,30 +1,34 @@
 # Streets of Rogue 1: BepInEx 5 mods
 
-## LargerText v2.0.0 — simple 1.35× for **all** text
+## LargerText v2.1.0 — 1.20× with large-text protection
 
-This is a **fresh rewrite** after v1.1–v1.2's selective font logic failed on the user's installed game.
+This release is a **small extension of the v2.0 implementation confirmed working in-game**. It deliberately retains the same startup / scene-load scan and UI text change hooks, not the nonworking v1.1/v1.2 approach.
 
-- Increases the original font size of **every supported text component** by **35%**, no thresholds, percentiles, title detection, or menu exclusions.
-- Supports `UnityEngine.UI.Text`, `UnityEngine.TextMesh`, `TMPro.TMP_Text` and `tk2dTextMesh` where their writable font-size/scale properties are available.
-- Scans game UI objects **once at startup and once after each scene load** (including inactive menu elements). No `Update()`, no recurring 0.5-second scene scan and no overlay.
-- Also hooks `UnityEngine.UI.Text` font/text setter updates and UI activation to cover many text elements created after the initial scan. The expensive complete search never runs on a 0.5-second gameplay timer.
-- Disables UI Text `resizeTextForBestFit` on resized text so Unity doesn't immediately shrink it back to its original visual size.
-- Tracks each component's original size to prevent exponential growth on repeat updates.
-- No settings migration. BepInEx persists prior config values; if this build should use default 1.35, set `[General] Multiplier = 1.35` or delete the config with the game closed.
-- Only startup and scene scan counts are written to the log, no per-frame diagnostic output.
+### Font scaling
 
-**Limitation:** Making literally all text larger can cause overlap or clipping, especially already-large menus and HUD labels. This is requested and intentional. The initial scene-load search can cost some time during load; it no longer runs periodically in active gameplay. The new build is not yet in-game validated.
+- Default **Multiplier = 1.20** (20% larger).
+- Default **ProtectLargeText = true**.
+- Protection first excludes obvious title/heading/logo/banner object names and nearby parent objects.
+- On a scene-load scan, it also compares **original visual sizes** (original font size × transform scale) **separately per renderer type**. When there's a clear size gap (max at least 1.35× the median), it protects the largest tier of text, using a cutoff halfway between median and max. Other text is resized by the configured multiplier.
+- Scenes with nearly uniform text sizes have no automatic size tier. This prevents accidentally protecting everything on screens that use a single font size.
+- **No periodic scene scans**: the size tier is computed during the existing one-time scan on load, and later UI text changes use cached thresholds. There is no `Update()` or diagnostic overlay.
+- Existing font size bookkeeping is preserved so sizes are not multiplied repeatedly; for protected UI text, Unity's original Best Fit setting is restored if it was previously changed.
+- No config migrations or automatic rewriting of `Multiplier` values.
+
+The large-font protection is heuristic: Unity UI object names and scales depend on the game screen. It is designed to keep the biggest menu headings unchanged while enlarging descriptions and smaller labels, but it still needs in-game checking.
 
 ### Installation
 
-1. Install BepInEx 5 Windows x64, as in previous versions; SteamOS/Proton launch options: `WINEDLLOVERRIDES="winhttp=n,b" %command%`.
-2. Replace `<game>/BepInEx/plugins/LargerText.dll` with the DLL from the archive.
-3. With the game closed, delete `<game>/BepInEx/config/mspeedo.sor.larger-text.cfg` to get default `Multiplier = 1.35`; this is **not** a migration.
-4. Start game and look for `Larger Text v2.0 loaded` and `Larger Text scene scan` in `BepInEx/LogOutput.log`.
+1. Install BepInEx 5 (Windows x64) for the Windows game. Under Proton launch options use `WINEDLLOVERRIDES="winhttp=n,b" %command%`.
+2. Replace `<game>/BepInEx/plugins/LargerText.dll` with the DLL from the ZIP.
+3. **Important:** BepInEx keeps your previous multiplier. To use the new default, while the game is closed set `Multiplier = 1.2` in `BepInEx/config/mspeedo.sor.larger-text.cfg`, or delete only that config file for fresh defaults.
+4. Launch the game; confirm startup in `BepInEx/LogOutput.log`.
 
-## UnlimitedRetries v0.2.0 (unchanged)
+You can turn off the new protection with `ProtectLargeText = false` to return to v2.0-style all-font resizing (at the chosen multiplier).
 
-Uses the built-in **Continue?** mutator to replenish the continues counter and allow nearly unlimited retrying of the same floor. It does not provide a manual restart without dying.
+## UnlimitedRetries v0.2.0 — unchanged
+
+Works with the game's **Continue?** mutator. Replenishes the continues counter for effectively unlimited retries of the current floor. No manual floor reset is implemented.
 
 ## Build
 
@@ -33,4 +37,4 @@ dotnet build streets-of-rogue/LargerText/LargerText.csproj -c Release
 dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj -c Release
 ```
 
-The GitHub Actions workflow builds both DLLs against public NuGet packages and packages `BepInEx/plugins/`. The repository contains no proprietary game DLLs.
+GitHub Actions produces DLLs for BepInEx 5 without publishing proprietary game assemblies.
