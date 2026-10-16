@@ -21,3 +21,17 @@ dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj -c Releas
 dotnet build streets-of-rogue/LargerText/LargerText.csproj -c Release
 ```
 Uses public NuGet reference packages; **no proprietary game assemblies are committed** to this repository. The game assembly metadata is only used for understanding internal names and behavior. GitHub Actions publishes two ready-to-install DLLs in a ZIP, not Unity or game DLL dependencies.
+
+
+## Selective small-font mode (LargerText v0.3)
+
+**The normal menu font stays unchanged.** The mod now works in two paths:
+
+- Unity UI, TextMesh, TMP: scales only text with an original font size strictly below `MaxOriginalFontSize` (default **18**). It also caps the enlarged text at 18, so small text cannot become larger than the menu cutoff.
+- 2D Toolkit `tk2dTextMesh` (used by Streets of Rogue): scales the actual text mesh, **not** its parent UI transform. A sampled large-text reference is computed every scan; only text below `Tk2dSmallTextFraction` (default **0.80**) of that reference is enlarged. The enlarged result is capped at the reference size. Text at or near the reference stays unchanged.
+
+The original 1.35× `Multiplier` remains configurable. To make fewer elements eligible, lower `MaxOriginalFontSize` to 16, or lower `Tk2dSmallTextFraction` to 0.7. Because the game uses multiple text renderers and sizes, this is a **heuristic**; compare in-game menus and item descriptions and tune as needed. Enable `LogFontSizes` temporarily for tk2d measurements in `BepInEx/LogOutput.log`.
+
+**Config upgrade note:** BepInEx preserves existing settings. If you previously ran v0.2 with `MaxOriginalFontSize = 22`, manually change it to `18` in `BepInEx/config/mspeedo.sor.larger-text.cfg`. Restart the game.
+
+Install only the updated `LargerText.dll` to upgrade text scaling; `UnlimitedRetries.dll` is unchanged.
