@@ -1,42 +1,43 @@
-# Streets of Rogue 1 — BepInEx 5 mods
+# Streets of Rogue — BepInEx 5 mods
 
-Two independent plugins for the original **Streets of Rogue** using BepInEx 5 (Windows / SteamOS via Proton).
+Two independent plugins for the original *Streets of Rogue* (Windows, or SteamOS running the Windows game under Proton).
 
-## LargerText v1.0.0 — production defaults
+## LargerText v1.1 — event-driven small fonts
 
-Based on the **v0.4 text-scaling implementation confirmed to work in-game**. No changes were made to the font detection/scaling algorithm in v1.0, only defaults, logging and config migration.
+This replaces the v1.0 adaptive percentile model. V1.0 could enlarge even the largest heading when a still larger font appeared elsewhere. It also scanned every active text component every 0.5 seconds and caused stutters on the handheld.
 
-- **Multiplier = 1.50** (maximum 150% of original size)
-- **SmallTextFraction = 0.82** (enlarge only text smaller than 82% of the scene reference font size)
-- **ReferencePercentile = 0.85** (normal-size text reference)
-- **ShowOverlay = false** by default (optional diagnostic overlay can still be enabled)
-- **LogSamples = false** by default (optional diagnostic logging can still be enabled)
-- **ForceAllText = false** (diagnostic force-all mode disabled)
-- **ScanSeconds = 0.5**
+**v1.1 changes:**
 
-Works with `UnityEngine.UI.Text`, `UnityEngine.TextMesh`, `TMPro.TMP_Text`, and `tk2dTextMesh`. Scans and scales only active, enabled scene components. For Unity text, uses fontSize and optional Best Fit override; for tk2d, uses component-local mesh scale. Existing large menu text stays unchanged when `ForceAllText = false`.
+- **No recurring scene scan.** No `Update()`, no `Resources.FindObjectsOfTypeAll`, no overlay, no periodic diagnostic logging. Harmony subscribes to Unity UI text enabling and changes to its `fontSize` setter. Only an affected text element is processed when it appears or changes font size.
+- **Stable absolute size safeguards:** only font sizes below BOTH `MaxOriginalFontSize` (default 40) AND `MaxVisualFontSize` (default 25 approximate screen pixels) are eligible. Titles, headings, buttons, logos and big text objects are explicitly excluded by name. Enlarged text is capped at the visual size bound.
+- **Zoom default 1.5x** (`Multiplier=1.5`). Dynamic reference percentiles are removed.
+- BepInEx's Unity UI Best Fit sizing is disabled only for enlarged small text, and restored when not enlarged.
+- Legacy `tk2dTextMesh` can be enabled for experiments, but is **off by default** because tk2d's coordinate scaling differs from Unity UI.
+- **No one-time settings migration.** Code does not read or write `SettingsVersion`, and never rewrites your old configuration values during startup.
 
-**Existing configuration migration:** BepInEx preserves configured values across DLL updates. The plugin's first v1.0 startup updates old v0.4 default values: `Multiplier = 1.70` to `1.50`, `ShowOverlay = true` to `false`, `LogSamples = true` to `false`, and disables `ForceAllText`. Other user choices remain unchanged (for example a prior custom multiplier of 1.35 will stay 1.35). Migration is saved once via `SettingsVersion`. You can always edit `BepInEx/config/mspeedo.sor.larger-text.cfg` if you prefer another zoom level.
+### Installation
 
-## UnlimitedRetries v0.2.0 — unchanged
+Copy `LargerText.dll` to `<game>/BepInEx/plugins/`, replacing the previous DLL.
 
-Works with the built-in **Continue?** mutator. Replenishes `SessionData.continues` to 10,000 so the game's original continue/restore workflow can repeat effectively indefinitely. Requires the mutator to be selected. A manual restart-floor button is **not** implemented.
+**Important when upgrading from v0.4 or v1.0:** BepInEx persists old settings. Close the game, delete only `<game>/BepInEx/config/mspeedo.sor.larger-text.cfg` and start it again **if you want the new defaults**. Alternately, retain the file and edit `[General] Multiplier = 1.5`. Obsolete values such as `SmallTextFraction`, `ShowOverlay`, `ForceAllText`, and `SettingsVersion` are ignored, not migrated.
 
-## Install
+If small text remains unchanged, try raising `MaxVisualFontSize` from 25 to 30 in the config; avoid raising it excessively because that could affect headings. The filter also blocks font sizes originally 40 or larger; names containing `title`, `header`, `heading`, `logo`, `bigtext`, `largetext`, `bigmessage`, or `button` in the first three ancestor objects are protected. Legacy tk2d support is optional and has no polling.
 
-1. Install BepInEx **5 Windows x64** in the game's directory, alongside `StreetsOfRogue.exe`.
-2. Under Steam/Proton launch options, set `WINEDLLOVERRIDES="winhttp=n,b" %command%`.
-3. Copy `LargerText.dll` and/or `UnlimitedRetries.dll` to `Streets of Rogue/BepInEx/plugins/`.
-4. Launch the game. Settings are saved in `BepInEx/config/mspeedo.sor.larger-text.cfg` and `BepInEx/config/mspeedo.sor.unlimited-retries.cfg`.
-5. To use unlimited retries, enable **Continue?** in mutators before starting a run.
+### Diagnostics
 
-**Testing and caveats:** v0.4 font scaling was confirmed functional in-game. v1.0 has new defaults but still requires in-game validation. Some enlarged text may clip because fixed game UI layout regions do not grow. Back up game saves before using experimental retry mechanics.
+Check `BepInEx/LogOutput.log` for a single `Larger Text 1.1 loaded:` line showing patch count. Set `LogEligibleText=true` to log resized text at property change / activation events. The diagnostic overlay from v0.4 is intentionally removed.
+
+This version is compiled but needs in-game validation for the exact game's UI sizes and lifecycle hooks.
+
+## UnlimitedRetries v0.2 — unchanged
+
+Enables effectively unlimited retries through the game's built-in **Continue?** mutator by replenishing its active continues counter. Requires the mutator, does not add a manual restart option.
 
 ## Build
 
 ```bash
-dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj -c Release
 dotnet build streets-of-rogue/LargerText/LargerText.csproj -c Release
+dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj -c Release
 ```
 
-The GitHub Actions workflow builds against public NuGet reference packages and uploads an installable ZIP. **No proprietary game DLLs are committed to this repository.**
+GitHub Actions compiles against public reference packages and creates installable plugin DLLs, without committing proprietary game DLLs.
