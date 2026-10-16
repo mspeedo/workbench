@@ -1,337 +1,301 @@
 using System;
-using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using BepInEx;
 using BepInEx.Configuration;
+using HarmonyLib;
 using UnityEngine;
 
 namespace SoRLargerText
 {
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "1.0.0")]
+    /// <summary>
+    /// Event-driven small text adjustment. No Update(), OnGUI(), or hierarchy scans.
+    /// Version 1.1 deliberately uses fixed cutoffs instead of a moving scene
+    /// percentile, so headings cannot become "small" just because another giant
+    /// text element entered the scene.
+    /// </summary>
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "1.1.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
-        private ConfigEntry<bool> enabled, showOverlay, forceAll, includeTk2d, disableBestFit, logExamples;
-        private ConfigEntry<float> multiplier, smallFraction, referencePercentile, scanSeconds;
-        private ConfigEntry<int> configVersion;
-        private readonly List<Type> textTypes = new List<Type>();
-        private readonly Dictionary<int, Record> textRecords = new Dictionary<int, Record>();
-        private readonly Dictionary<int, Record> tkRecords = new Dictionary<int, Record>();
-        private float sinceScan, sinceLog, sincePrune;
-        private GUIStyle overlayStyle;
-        private int uiFound, uiChanged, tkFound, tkChanged;
-        private float uiReference, tkReference;
-        private string sample = "No text samples yet";
+        private static Plugin instance;
+        private static bool writingFont;
+        private static bool writingTk;
+        private static Type uiTextType;
+        private static Type tkTextType;
+        private static PropertyInfo uiFontSize;
+        private static PropertyInfo tkScale;
+        private static readonly ConditionalWeakTable<Component, TextState> states =
+            new ConditionalWeakTable<Component, TextState>();
 
-        private sealed class Record
-        {
-            public Component Component;
-            public float OriginalFontSize;
-            public float AppliedFontSize;
-            public Vector3 OriginalScale;
-            public Vector3 AppliedScale;
-            public bool HasBestFit, OriginalBestFit;
-        }
+        private ConfigEntry<bool> enabled, enableTk2d, excludeHeadings, trace;
+        private ConfigEntry<float> zoom, maxVisualPx, maxTkVisualSize;
+        private ConfigEntry<int> maxOriginalSize;
+        private Harmony harmony;
 
-        private sealed class Candidate
+        private sealed class TextState
         {
-            public Component Component;
-            public PropertyInfo SizeProperty;
-            public Record Record;
-            public float VisualSize;
+            public float BaselineFont;
+            public float AppliedFont;
+            public Vector3 BaselineTk;
+            public Vector3 AppliedTk;
+            public bool HasFont;
+            public bool HasTk;
         }
 
         private void Awake()
         {
-            enabled = Config.Bind("General", "Enabled", true, "Enable selective font enlargement.");
-            multiplier = Config.Bind("General", "Multiplier", 1.50f,
-                "Maximum enlargement for smaller fonts. Default 1.5x; capped at normal-sized text.");
-            smallFraction = Config.Bind("General", "SmallTextFraction", 0.82f,
-                "Only fonts whose original visual size is smaller than this fraction of the reference are enlarged. Lower = fewer affected.");
-            referencePercentile = Config.Bind("General", "ReferencePercentile", 0.85f,
-                "The percentile of visible text sizes used as the normal-text reference. Usually 0.8-0.9.");
-            includeTk2d = Config.Bind("General", "IncludeTk2dText", true,
-                "Include legacy 2D Toolkit labels.");
-            disableBestFit = Config.Bind("General", "OverrideBestFitForSmallText", true,
-                "Temporarily disable Unity UI Best Fit on enlarged text, otherwise its automatic sizing can hide the change.");
-            showOverlay = Config.Bind("Diagnostics", "ShowOverlay", false,
-                "Optional diagnostic overlay, disabled by default for normal gameplay.");
-            forceAll = Config.Bind("Diagnostics", "ForceAllText", false,
-                "TEST ONLY: enlarge every detected text component, including menu text. Useful to prove the plugin works. Switch off after testing.");
-            logExamples = Config.Bind("Diagnostics", "LogSamples", false,
-                "Optional periodic diagnostic logging (off by default).");
-            scanSeconds = Config.Bind("Performance", "ScanSeconds", 0.50f, "Text rescan interval (minimum 0.2 seconds).");
-            // BepInEx persists old defaults in its config. Migrate only those
-            // previously-default values once; preserve other user customizations.
-            configVersion = Config.Bind("General", "SettingsVersion", 0,
-                "Internal one-time default migration marker; do not edit.");
-            if (configVersion.Value < 1)
-            {
-                if (Math.Abs(multiplier.Value - 1.70f) < 0.0001f)
-                    multiplier.Value = 1.50f;
-                if (showOverlay.Value)
-                    showOverlay.Value = false;
-                if (logExamples.Value)
-                    logExamples.Value = false;
-                if (forceAll.Value)
-                    forceAll.Value = false; // Don't ship a test-only override enabled.
-                configVersion.Value = 1;
-                Config.Save();
-            }
-            Logger.LogInfo("Larger Text v1.0.0 loaded (zoom=" + multiplier.Value.ToString("F2")
-                + "x, overlay=" + showOverlay.Value + ").");
-        }
+            instance = this;
+            enabled = Config.Bind("General", "Enabled", true, "Enable smaller-text enlargement.");
+            zoom = Config.Bind("General", "Multiplier", 1.50f,
+                "Enlarge eligible small text by up to 1.5x.");
+            maxVisualPx = Config.Bind("General", "MaxVisualFontSize", 25f,
+                "Only resize text with original size strictly below this estimated onscreen size.");
+            maxOriginalSize = Config.Bind("General", "MaxOriginalFontSize", 40,
+                "Additional safety bound for the original fontSize; larger headings remain unchanged.");
+            excludeHeadings = Config.Bind("General", "ProtectTitlesAndButtons", true,
+                "Protect title/header/large/button/logo labels from text scaling.");
+            enableTk2d = Config.Bind("General", "EnableTk2d", false,
+                "Experimental: also scale legacy tk2d labels; disabled by default because tk2d font dimensions differ from Unity UI.");
+            maxTkVisualSize = Config.Bind("General", "MaxTk2dVisualScale", 0.60f,
+                "Experimental tk2d selection threshold based on its original text scale.");
+            trace = Config.Bind("Diagnostics", "LogEligibleText", false,
+                "Log eligible text components as they are initialized (diagnostics only).");
 
-        private void Update()
-        {
-            sinceScan += Time.unscaledDeltaTime;
-            sinceLog += Time.unscaledDeltaTime;
-            sincePrune += Time.unscaledDeltaTime;
-            if (sinceScan < Mathf.Max(0.2f, scanSeconds.Value)) return;
-            sinceScan = 0f;
-            DiscoverNewTypes();
-
-            var ui = new List<Candidate>();
-            var tk = new List<Candidate>();
-            foreach (Type t in textTypes)
+            // Intentionally NO settings migration: prior config values are respected.
+            // To load all new defaults, delete mspeedo.sor.larger-text.cfg with the game closed.
+            harmony = new Harmony("mspeedo.sor.larger-text");
+            int patched = 0;
+            try
             {
-                try
+                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    foreach (UnityEngine.Object item in Resources.FindObjectsOfTypeAll(t))
+                    if (uiTextType == null)
+                        uiTextType = assembly.GetType("UnityEngine.UI.Text", false);
+                    if (tkTextType == null)
+                        tkTextType = assembly.GetType("tk2dTextMesh", false);
+                }
+
+                if (uiTextType != null)
+                {
+                    uiFontSize = uiTextType.GetProperty("fontSize",
+                        BindingFlags.Instance | BindingFlags.Public);
+                    MethodInfo setter = uiFontSize != null ? uiFontSize.GetSetMethod() : null;
+                    if (setter != null)
                     {
-                        Component c = item as Component;
-                        if (c == null || c.gameObject == null || !c.gameObject.activeInHierarchy)
-                            continue;
-                        Behaviour behaviour = c as Behaviour;
-                        if (behaviour != null && !behaviour.enabled) continue;
-                        if (!c.gameObject.scene.IsValid()) continue;
-                        if (t.Name == "tk2dTextMesh")
-                        {
-                            if (includeTk2d.Value) CollectTk(c, tk);
-                        }
-                        else
-                            CollectUi(c, ui);
+                        harmony.Patch(setter,
+                            prefix: new HarmonyMethod(typeof(Plugin).GetMethod("FontSizePrefix",
+                                BindingFlags.Static | BindingFlags.NonPublic)),
+                            postfix: new HarmonyMethod(typeof(Plugin).GetMethod("FontSizePostfix",
+                                BindingFlags.Static | BindingFlags.NonPublic)));
+                        patched++;
+                    }
+
+                    // Text usually inherits Graphic.OnEnable. Hooking Graphic's
+                    // implementation catches activation without polling the scene.
+                    Type graphic = uiTextType.BaseType;
+                    MethodInfo onEnable = null;
+                    for (Type t = uiTextType; t != null && onEnable == null; t = t.BaseType)
+                        onEnable = t.GetMethod("OnEnable", BindingFlags.Instance |
+                            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.DeclaredOnly);
+                    if (onEnable != null)
+                    {
+                        harmony.Patch(onEnable,
+                            postfix: new HarmonyMethod(typeof(Plugin).GetMethod("UiEnablePostfix",
+                                BindingFlags.Static | BindingFlags.NonPublic)));
+                        patched++;
                     }
                 }
-                catch (Exception e) { Logger.LogWarning("Could not scan " + t.FullName + ": " + e.Message); }
-            }
 
-            uiFound = ui.Count;
-            tkFound = tk.Count;
-            uiChanged = ApplyUi(ui);
-            tkChanged = ApplyTk(tk);
-
-            if (logExamples.Value && sinceLog >= 10f)
-            {
-                sinceLog = 0f;
-                Logger.LogInfo("LargerText v1.0: UI " + uiChanged + "/" + uiFound +
-                               " changed, reference size=" + uiReference.ToString("F2") +
-                               " | tk2d " + tkChanged + "/" + tkFound +
-                               " changed, reference size=" + tkReference.ToString("F3") +
-                               " | ForceAllText=" + forceAll.Value + " | sample: " + sample);
-            }
-
-            if (sincePrune >= 60f)
-            {
-                sincePrune = 0f;
-                Prune(textRecords);
-                Prune(tkRecords);
-            }
-        }
-
-        private void DiscoverNewTypes()
-        {
-            string[] names = { "UnityEngine.UI.Text", "UnityEngine.TextMesh", "TMPro.TMP_Text", "tk2dTextMesh" };
-            foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
-            foreach (string n in names)
-            {
-                Type t = a.GetType(n, false);
-                if (t != null && typeof(Component).IsAssignableFrom(t) && !textTypes.Contains(t))
+                if (tkTextType != null)
                 {
-                    textTypes.Add(t);
-                    Logger.LogInfo("LargerText renderer: " + t.FullName + ", assembly " + a.GetName().Name);
-                }
-            }
-        }
-
-        private void CollectUi(Component c, List<Candidate> items)
-        {
-            PropertyInfo prop = c.GetType().GetProperty("fontSize",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            if (prop == null || !prop.CanRead || !prop.CanWrite ||
-                (prop.PropertyType != typeof(int) && prop.PropertyType != typeof(float))) return;
-            float current;
-            try { current = Convert.ToSingle(prop.GetValue(c, null)); }
-            catch { return; }
-            if (current <= 0 || float.IsNaN(current) || float.IsInfinity(current)) return;
-
-            int id = c.GetInstanceID();
-            Record r;
-            if (!textRecords.TryGetValue(id, out r) || r.Component != c)
-            {
-                r = new Record { Component = c, OriginalFontSize = current, AppliedFontSize = current };
-                textRecords[id] = r;
-                PropertyInfo fit = GetBestFitProperty(c);
-                if (fit != null)
-                {
-                    try { r.HasBestFit = true; r.OriginalBestFit = (bool)fit.GetValue(c, null); }
-                    catch { r.HasBestFit = false; }
-                }
-            }
-            else if (Math.Abs(current - r.AppliedFontSize) > 0.05f)
-            {
-                r.OriginalFontSize = current;
-                r.AppliedFontSize = current;
-            }
-
-            // The previous mod used a fixed fontSize <= 18 threshold. This
-            // game's actual Unity Text fonts can be much larger but rendered
-            // small because of parent Canvas/RectTransform scaling.
-            float visual = Math.Abs(r.OriginalFontSize * c.transform.lossyScale.y);
-            if (visual < 0.001f || float.IsNaN(visual) || float.IsInfinity(visual))
-                visual = r.OriginalFontSize;
-            items.Add(new Candidate { Component = c, SizeProperty = prop, Record = r, VisualSize = visual });
-        }
-
-        private void CollectTk(Component c, List<Candidate> items)
-        {
-            PropertyInfo prop = c.GetType().GetProperty("scale",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            if (prop == null || !prop.CanRead || !prop.CanWrite || prop.PropertyType != typeof(Vector3)) return;
-            Vector3 current;
-            try { current = (Vector3)prop.GetValue(c, null); }
-            catch { return; }
-            if (Math.Abs(current.y) < 0.00001f) return;
-            int id = c.GetInstanceID();
-            Record r;
-            if (!tkRecords.TryGetValue(id, out r) || r.Component != c)
-            {
-                r = new Record { Component = c, OriginalScale = current, AppliedScale = current };
-                tkRecords[id] = r;
-            }
-            else if ((current - r.AppliedScale).sqrMagnitude > 0.000001f)
-                r.OriginalScale = current;
-
-            float visual = Math.Abs(r.OriginalScale.y * c.transform.lossyScale.y);
-            if (visual < 0.000001f || float.IsNaN(visual) || float.IsInfinity(visual)) return;
-            items.Add(new Candidate { Component = c, SizeProperty = prop, Record = r, VisualSize = visual });
-        }
-
-        private static PropertyInfo GetBestFitProperty(Component c)
-        {
-            PropertyInfo p = c.GetType().GetProperty("resizeTextForBestFit", BindingFlags.Public | BindingFlags.Instance);
-            return p != null && p.CanRead && p.CanWrite && p.PropertyType == typeof(bool) ? p : null;
-        }
-
-        private float Reference(List<Candidate> items)
-        {
-            if (items.Count == 0) return 0f;
-            var sorted = new List<float>(items.Count);
-            foreach (Candidate item in items) sorted.Add(item.VisualSize);
-            sorted.Sort();
-            int index = (int)Math.Floor((sorted.Count - 1) * Mathf.Clamp(referencePercentile.Value, 0.50f, 0.98f));
-            return sorted[index];
-        }
-
-        private float ScaleFor(float size, float reference)
-        {
-            if (!enabled.Value) return 1f;
-            float factor = Mathf.Clamp(multiplier.Value, 1.0f, 3.0f);
-            if (forceAll.Value) return factor;
-            if (reference <= 0f || size >= reference * Mathf.Clamp(smallFraction.Value, 0.10f, 0.99f))
-                return 1f;
-            // Never make small labels larger than their normal-sized peers.
-            return Mathf.Min(factor, reference / size);
-        }
-
-        private int ApplyUi(List<Candidate> items)
-        {
-            float reference = uiReference = Reference(items);
-            int changed = 0;
-            Candidate example = null;
-            foreach (Candidate item in items)
-            {
-                float factor = ScaleFor(item.VisualSize, reference);
-                if (factor > 1.001f) { changed++; if (example == null) example = item; }
-                float desired = item.Record.OriginalFontSize * factor;
-                if (item.SizeProperty.PropertyType == typeof(int))
-                    desired = (float)Math.Round(desired);
-
-                try
-                {
-                    // Best Fit clamps the displayed size even when fontSize changes.
-                    // For small labels, disable Best Fit to make scaling observable.
-                    PropertyInfo bestFit = GetBestFitProperty(item.Component);
-                    if (bestFit != null && item.Record.HasBestFit)
+                    tkScale = tkTextType.GetProperty("scale",
+                        BindingFlags.Public | BindingFlags.Instance);
+                    MethodInfo setter = tkScale != null ? tkScale.GetSetMethod() : null;
+                    if (setter != null)
                     {
-                        bool desiredBestFit = item.Record.OriginalBestFit &&
-                            !(factor > 1.001f && disableBestFit.Value);
-                        if ((bool)bestFit.GetValue(item.Component, null) != desiredBestFit)
-                            bestFit.SetValue(item.Component, desiredBestFit, null);
+                        harmony.Patch(setter,
+                            prefix: new HarmonyMethod(typeof(Plugin).GetMethod("TkScalePrefix",
+                                BindingFlags.Static | BindingFlags.NonPublic)),
+                            postfix: new HarmonyMethod(typeof(Plugin).GetMethod("TkScalePostfix",
+                                BindingFlags.Static | BindingFlags.NonPublic)));
+                        patched++;
                     }
-                    float current = Convert.ToSingle(item.SizeProperty.GetValue(item.Component, null));
-                    if (Math.Abs(current - desired) > 0.05f)
-                        item.SizeProperty.SetValue(item.Component,
-                            item.SizeProperty.PropertyType == typeof(int) ? (object)(int)desired : desired, null);
-                    item.Record.AppliedFontSize = desired;
+                    MethodInfo enableTk = tkTextType.GetMethod("OnEnable",
+                        BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance |
+                        BindingFlags.DeclaredOnly);
+                    if (enableTk != null)
+                    {
+                        harmony.Patch(enableTk,
+                            postfix: new HarmonyMethod(typeof(Plugin).GetMethod("TkEnablePostfix",
+                                BindingFlags.Static | BindingFlags.NonPublic)));
+                        patched++;
+                    }
                 }
-                catch (Exception e) { Logger.LogDebug("Could not resize UI text: " + e.Message); }
+                Logger.LogInfo("Larger Text 1.1 loaded: " + patched +
+                    " lifecycle/property hooks; no scan, no overlay, no settings migration.");
+                if (patched == 0)
+                    Logger.LogWarning("No supported UI text hooks found; please send BepInEx/LogOutput.log.");
             }
-            if (example != null)
-                sample = "UI name=" + example.Component.gameObject.name +
-                         " baseFont=" + example.Record.OriginalFontSize.ToString("F1") +
-                         " scaled=" + ScaleFor(example.VisualSize, reference).ToString("F2") + "x";
-            else if (items.Count > 0)
-                sample = "No small UI fonts under reference ratio; first font=" + items[0].Record.OriginalFontSize;
-            return changed;
+            catch (Exception e)
+            {
+                Logger.LogError("Text hook setup failed: " + e);
+            }
         }
 
-        private int ApplyTk(List<Candidate> items)
+        private static void UiEnablePostfix(object __instance)
         {
-            float reference = tkReference = Reference(items);
-            int changed = 0;
-            foreach (Candidate item in items)
+            if (writingFont || instance == null || uiTextType == null ||
+                !uiTextType.IsInstanceOfType(__instance)) return;
+            Component component = __instance as Component;
+            if (component != null) instance.ResizeUi(component, null);
+        }
+
+        private static void FontSizePrefix(object __instance, int value)
+        {
+            if (writingFont || instance == null || __instance == null) return;
+            Component component = __instance as Component;
+            if (component == null) return;
+            TextState state = states.GetOrCreateValue(component);
+            if (!state.HasFont || Math.Abs(value - state.AppliedFont) > 0.01f)
             {
-                float factor = ScaleFor(item.VisualSize, reference);
-                if (factor > 1.001f) changed++;
-                Vector3 s = item.Record.OriginalScale;
-                Vector3 desired = new Vector3(s.x * factor, s.y * factor, s.z);
-                try
+                state.BaselineFont = value;
+                state.HasFont = true;
+            }
+        }
+
+        private static void FontSizePostfix(object __instance)
+        {
+            if (writingFont || instance == null) return;
+            Component component = __instance as Component;
+            if (component != null) instance.ResizeUi(component, null);
+        }
+
+        private void ResizeUi(Component component, float? supplied)
+        {
+            if (uiFontSize == null || component == null) return;
+            try
+            {
+                TextState state = states.GetOrCreateValue(component);
+                float current = supplied ?? Convert.ToSingle(uiFontSize.GetValue(component, null));
+                if (!state.HasFont)
                 {
-                    Vector3 current = (Vector3)item.SizeProperty.GetValue(item.Component, null);
-                    if ((current - desired).sqrMagnitude > 0.000001f)
-                        item.SizeProperty.SetValue(item.Component, desired, null);
-                    item.Record.AppliedScale = desired;
+                    state.BaselineFont = current;
+                    state.AppliedFont = current;
+                    state.HasFont = true;
                 }
-                catch (Exception e) { Logger.LogDebug("Could not resize tk2d: " + e.Message); }
+                float size = state.BaselineFont;
+                bool eligible = enabled.Value &&
+                    size > 0f &&
+                    size < maxOriginalSize.Value &&
+                    !IsTitleOrButton(component) &&
+                    GetVisualSize(size, component.transform) < maxVisualPx.Value;
+                float wanted = eligible
+                    ? (float)Math.Round(size * Mathf.Clamp(zoom.Value, 1f, 2f))
+                    : size;
+                if (eligible && trace.Value && Math.Abs(state.AppliedFont - wanted) > 0.01f)
+                    Logger.LogInfo("Text enlarged: " + component.name +
+                        " original=" + size + " new=" + wanted);
+                if (Math.Abs(current - wanted) > 0.01f)
+                {
+                    writingFont = true;
+                    try { uiFontSize.SetValue(component, (int)wanted, null); }
+                    finally { writingFont = false; }
+                }
+                state.AppliedFont = wanted;
             }
-            return changed;
-        }
-
-        private static void Prune(Dictionary<int, Record> dict)
-        {
-            var dead = new List<int>();
-            foreach (var kv in dict) if (kv.Value.Component == null) dead.Add(kv.Key);
-            foreach (int id in dead) dict.Remove(id);
-        }
-
-        private void OnGUI()
-        {
-            if (showOverlay == null || !showOverlay.Value) return;
-            if (overlayStyle == null)
+            catch (Exception ex)
             {
-                overlayStyle = new GUIStyle(GUI.skin.label);
-                overlayStyle.fontSize = 19;
-                overlayStyle.normal.textColor = Color.white;
-                overlayStyle.wordWrap = true;
+                Logger.LogDebug("UI text adjust: " + ex.Message);
             }
-            GUI.Box(new Rect(10, 10, 690, 111), "");
-            string display = "Larger Text v1.0 | " +
-                (enabled.Value ? "ON" : "OFF") + (forceAll.Value ? " | FORCE ALL" : "") +
-                "\nUI text: " + uiChanged + "/" + uiFound + " enlarged   tk2d: " +
-                tkChanged + "/" + tkFound + " enlarged" +
-                "\n" + sample +
-                "\nConfig: BepInEx/config/mspeedo.sor.larger-text.cfg";
-            GUI.Label(new Rect(24, 13, 660, 106), display, overlayStyle);
+        }
+
+        private float GetVisualSize(float original, Transform transform)
+        {
+            if (transform == null) return original;
+            float scale = Math.Abs(transform.lossyScale.y);
+            if (float.IsNaN(scale) || scale <= 0.00001f) return original;
+            return original * scale;
+        }
+
+        private bool IsTitleOrButton(Component component)
+        {
+            if (!excludeHeadings.Value) return false;
+            // Inspect just a few ancestors on text lifecycle events, rather
+            // than repeatedly traversing every object in the scene.
+            Transform t = component.transform;
+            for (int i = 0; i < 3 && t != null; i++, t = t.parent)
+            {
+                string name = t.gameObject.name.ToLowerInvariant();
+                if (name.Contains("title") || name.Contains("header") ||
+                    name.Contains("heading") || name.Contains("logo") ||
+                    name.Contains("bigtext") || name.Contains("largetext") ||
+                    name.Contains("bigmessage") || name.Contains("button"))
+                    return true;
+            }
+            return false;
+        }
+
+        private static void TkScalePrefix(object __instance, Vector3 value)
+        {
+            if (writingTk || instance == null || __instance == null) return;
+            Component c = __instance as Component;
+            if (c == null) return;
+            TextState s = states.GetOrCreateValue(c);
+            if (!s.HasTk || (value - s.AppliedTk).sqrMagnitude > 0.000001f)
+            {
+                s.BaselineTk = value;
+                s.HasTk = true;
+            }
+        }
+
+        private static void TkScalePostfix(object __instance)
+        {
+            if (writingTk || instance == null) return;
+            Component c = __instance as Component;
+            if (c != null) instance.ResizeTk(c);
+        }
+
+        private static void TkEnablePostfix(object __instance)
+        {
+            if (writingTk || instance == null) return;
+            Component c = __instance as Component;
+            if (c != null) instance.ResizeTk(c);
+        }
+
+        private void ResizeTk(Component c)
+        {
+            if (tkScale == null || c == null) return;
+            try
+            {
+                TextState s = states.GetOrCreateValue(c);
+                Vector3 current = (Vector3)tkScale.GetValue(c, null);
+                if (!s.HasTk)
+                {
+                    s.BaselineTk = current;
+                    s.AppliedTk = current;
+                    s.HasTk = true;
+                }
+                Vector3 b = s.BaselineTk;
+                float visual = GetVisualSize(Math.Abs(b.y), c.transform);
+                bool eligible = enabled.Value && enableTk2d.Value &&
+                    visual < maxTkVisualSize.Value && !IsTitleOrButton(c);
+                float factor = eligible ? Mathf.Clamp(zoom.Value, 1f, 2f) : 1f;
+                Vector3 wanted = new Vector3(b.x * factor, b.y * factor, b.z);
+                if ((current - wanted).sqrMagnitude > 0.000001f)
+                {
+                    writingTk = true;
+                    try { tkScale.SetValue(c, wanted, null); }
+                    finally { writingTk = false; }
+                }
+                s.AppliedTk = wanted;
+            }
+            catch (Exception ex) { Logger.LogDebug("tk2d text adjust: " + ex.Message); }
+        }
+
+        private void OnDestroy()
+        {
+            if (harmony != null) harmony.UnpatchSelf();
+            if (instance == this) instance = null;
         }
     }
 }
