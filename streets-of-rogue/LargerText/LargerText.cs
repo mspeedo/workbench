@@ -331,8 +331,11 @@ namespace SoRLargerText
                     }
                 }
 
-                if (changed && zoom > 1f && safeFit.Value &&
-                    uiTextType != null && uiTextType.IsInstanceOfType(component) &&
+                // Check even if fontSize did not change on this call:
+                // dialogue/mutator text itself can become longer in set_text.
+                if (zoom > 1f && wantedFont > entry.OriginalFont &&
+                    safeFit.Value && uiTextType != null &&
+                    uiTextType.IsInstanceOfType(component) &&
                     WouldClipText(component, type))
                 {
                     // A bigger text mesh would not fit its RectTransform.
