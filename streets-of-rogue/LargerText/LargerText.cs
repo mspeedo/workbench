@@ -10,10 +10,11 @@ using UnityEngine.SceneManagement;
 
 namespace SoRLargerText
 {
-    // Intentionally simple: all supported text is 1.35x its ORIGINAL size.
-    // No size thresholds, adaptive reference, name filters or settings migration.
-    // Rescans only after scene loads, not every 0.5 seconds.
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.0.0")]
+    // Small extension of the known-working v2.0 implementation:
+    // multiply text by 1.2 unless it's an obviously large label.
+    // Determine large-size tiers once at scene load (not periodically).
+    // No startup settings migrations, overlay or repeated scans.
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.1.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private static readonly BindingFlags Props =
@@ -25,6 +26,11 @@ namespace SoRLargerText
         private readonly List<Type> renderers = new List<Type>();
         private ConfigEntry<bool> enabled;
         private ConfigEntry<float> multiplier;
+        private ConfigEntry<bool> protectLargeText;
+        // Separate thresholds for each renderer: tk2d scale cannot be
+        // meaningfully compared to a Unity UI fontSize.
+        private readonly Dictionary<string, float> largeSizeCutoffs =
+            new Dictionary<string, float>();
         private Harmony harmony;
         private Type uiTextType;
         private bool hooksInstalled, installing;
@@ -37,14 +43,18 @@ namespace SoRLargerText
             public Vector3 OriginalScale;
             public Vector3 AppliedScale;
             public bool Tk2d;
+            public bool OriginalBestFit;
+            public bool HasBestFit;
         }
 
         private void Awake()
         {
             instance = this;
             enabled = Config.Bind("General", "Enabled", true, "Enable font enlargement.");
-            multiplier = Config.Bind("General", "Multiplier", 1.35f,
-                "Multiply the original size of ALL detected text (1.35 = 35 percent larger).");
+            multiplier = Config.Bind("General", "Multiplier", 1.20f,
+                "Enlarge eligible text by 20 percent (1.2x).");
+            protectLargeText = Config.Bind("General", "ProtectLargeText", true,
+                "Keep the biggest text and obvious titles/headings at their original sizes.");
             // No settings migrations or writes. Existing Multiplier value is honored.
             harmony = new Harmony("mspeedo.sor.larger-text");
 
@@ -52,8 +62,9 @@ namespace SoRLargerText
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
             DiscoverRenderersAndHooks();
             StartCoroutine(ScanAfterSceneLoad());
-            Logger.LogInfo("Larger Text v2.0 loaded: all text at " + multiplier.Value.ToString("F2") +
-                           "x; single scan per scene; no periodic polling.");
+            Logger.LogInfo("Larger Text v2.1 loaded: zoom " + multiplier.Value.ToString("F2") +
+                           "x; large-text protection " + protectLargeText.Value +
+                           "; one scene scan, no periodic polling.");
         }
 
         private void OnAssemblyLoaded(object sender, AssemblyLoadEventArgs args)
@@ -156,6 +167,7 @@ namespace SoRLargerText
                     destroyed.Add(pair.Key);
             foreach (int id in destroyed)
                 known.Remove(id);
+            largeSizeCutoffs.Clear();
             StartCoroutine(ScanAfterSceneLoad());
         }
 
@@ -167,6 +179,10 @@ namespace SoRLargerText
             yield return null;
             DiscoverRenderersAndHooks();
             int found = 0, modified = 0;
+            // Gather first and classify original sizes BEFORE changing them.
+            // This adds one sort per scene, never a recurring gameplay pass.
+            var candidates = new List<Component>();
+            var byRenderer = new Dictionary<string, List<float>>();
             foreach (Type type in renderers)
             {
                 UnityEngine.Object[] objects;
@@ -178,9 +194,42 @@ namespace SoRLargerText
                     if (c == null || c.gameObject == null || !c.gameObject.scene.IsValid())
                         continue;
                     found++;
-                    if (Adjust(c)) modified++;
+                    candidates.Add(c);
+                    float originalSize;
+                    if (TryGetOriginalVisualSize(c, out originalSize))
+                    {
+                        string key = RendererKey(c);
+                        List<float> sizes;
+                        if (!byRenderer.TryGetValue(key, out sizes))
+                            byRenderer[key] = sizes = new List<float>();
+                        sizes.Add(originalSize);
+                    }
                 }
             }
+
+            largeSizeCutoffs.Clear();
+            if (protectLargeText.Value)
+            {
+                foreach (var pair in byRenderer)
+                {
+                    List<float> sizes = pair.Value;
+                    if (sizes.Count < 4) continue;
+                    sizes.Sort();
+                    float median = sizes[sizes.Count / 2];
+                    float maximum = sizes[sizes.Count - 1];
+                    // Only designate a "large tier" when it is clearly
+                    // separated from ordinary text sizes. Never reject all
+                    // labels just because a screen uses one uniform font.
+                    if (median > 0 && maximum >= median * 1.35f)
+                    {
+                        largeSizeCutoffs[pair.Key] = (median + maximum) / 2f;
+                        Logger.LogInfo("Large-text tier " + pair.Key + " >= " +
+                            largeSizeCutoffs[pair.Key].ToString("F2"));
+                    }
+                }
+            }
+            foreach (Component c in candidates)
+                if (Adjust(c)) modified++;
             Logger.LogInfo("Larger Text scene scan: seen=" + found + " enlarged=" + modified);
         }
 
@@ -208,11 +257,22 @@ namespace SoRLargerText
                     {
                         entry.OriginalFont = Convert.ToSingle(property.GetValue(component, null));
                         entry.AppliedFont = entry.OriginalFont;
+                        if (uiTextType != null && uiTextType.IsInstanceOfType(component))
+                        {
+                            PropertyInfo bestFit = type.GetProperty("resizeTextForBestFit", Props);
+                            if (bestFit != null && bestFit.CanRead && bestFit.CanWrite &&
+                                bestFit.PropertyType == typeof(bool))
+                            {
+                                entry.OriginalBestFit = (bool)bestFit.GetValue(component, null);
+                                entry.HasBestFit = true;
+                            }
+                        }
                     }
                 }
                 catch { known.Remove(id); return false; }
             }
-            float zoom = Mathf.Clamp(multiplier.Value, 1f, 3f);
+            float zoom = IsLargeText(component, entry) ? 1f :
+                Mathf.Clamp(multiplier.Value, 1f, 3f);
             try
             {
                 if (tk2d)
@@ -238,39 +298,97 @@ namespace SoRLargerText
                 float wantedFont = entry.OriginalFont * zoom;
                 if (property.PropertyType == typeof(int))
                     wantedFont = (float)Math.Round(wantedFont);
-                if (Math.Abs(currentFont - wantedFont) < 0.01f) return false;
-                internalWrite = true;
-                try
+                bool changed = Math.Abs(currentFont - wantedFont) >= 0.01f;
+                if (changed)
                 {
-                    property.SetValue(component,
-                        property.PropertyType == typeof(int) ? (object)(int)wantedFont : wantedFont, null);
+                    internalWrite = true;
+                    try
+                    {
+                        property.SetValue(component,
+                            property.PropertyType == typeof(int) ? (object)(int)wantedFont : wantedFont, null);
+                    }
+                    finally { internalWrite = false; }
                 }
-                finally { internalWrite = false; }
                 entry.AppliedFont = wantedFont;
-                // Unity's Best Fit can immediately shrink text back to the
-                // original visual size even after fontSize increases.
-                // For a "scale every text" mod, disable that auto-shrink.
-                if (uiTextType != null && uiTextType.IsInstanceOfType(component))
+                // Best Fit can undo an enlargement. Preserve the original
+                // value for protected labels (and if protection is toggled).
+                if (entry.HasBestFit)
                 {
                     PropertyInfo bestFit = type.GetProperty("resizeTextForBestFit", Props);
-                    if (bestFit != null && bestFit.CanRead && bestFit.CanWrite &&
-                        bestFit.PropertyType == typeof(bool))
+                    if (bestFit != null && bestFit.CanWrite)
                     {
                         try
                         {
-                            if ((bool)bestFit.GetValue(component, null))
-                                bestFit.SetValue(component, false, null);
+                            bool desiredFit = zoom == 1f && entry.OriginalBestFit;
+                            if ((bool)bestFit.GetValue(component, null) != desiredFit)
+                                bestFit.SetValue(component, desiredFit, null);
                         }
                         catch { }
                     }
                 }
-                return true;
+                return changed;
             }
             catch (Exception ex)
             {
                 Logger.LogDebug("Text adjust " + component.name + ": " + ex.Message);
                 return false;
             }
+        }
+
+        private static string RendererKey(Component c)
+        {
+            return c.GetType().FullName;
+        }
+
+        private bool TryGetOriginalVisualSize(Component component, out float size)
+        {
+            size = 0f;
+            if (component == null) return false;
+            try
+            {
+                bool tk2d = component.GetType().Name == "tk2dTextMesh";
+                Entry existing;
+                bool tracked = known.TryGetValue(component.GetInstanceID(), out existing) &&
+                    existing.Component == component && existing.Tk2d == tk2d;
+                if (tk2d)
+                {
+                    var p = component.GetType().GetProperty("scale", Props);
+                    Vector3 v = tracked ? existing.OriginalScale :
+                        (Vector3)p.GetValue(component, null);
+                    size = Math.Abs(v.y * component.transform.lossyScale.y);
+                }
+                else
+                {
+                    var p = component.GetType().GetProperty("fontSize", Props);
+                    float v = tracked ? existing.OriginalFont :
+                        Convert.ToSingle(p.GetValue(component, null));
+                    size = Math.Abs(v * component.transform.lossyScale.y);
+                }
+                return size > 0.00001f && !float.IsNaN(size) && !float.IsInfinity(size);
+            }
+            catch { return false; }
+        }
+
+        private bool IsLargeText(Component component, Entry entry)
+        {
+            if (!protectLargeText.Value) return false;
+            // Explicit title protection also applies to newly created UI
+            // whose renderer has not yet been included in a scene scan.
+            Transform t = component.transform;
+            for (int i = 0; i < 3 && t != null; i++, t = t.parent)
+            {
+                string n = t.gameObject.name.ToLowerInvariant();
+                if (n.Contains("title") || n.Contains("header") ||
+                    n.Contains("heading") || n.Contains("logo") ||
+                    n.Contains("bigtext") || n.Contains("largetext") ||
+                    n.Contains("banner"))
+                    return true;
+            }
+            float cutoff;
+            float size;
+            return largeSizeCutoffs.TryGetValue(RendererKey(component), out cutoff) &&
+                TryGetOriginalVisualSize(component, out size) &&
+                size >= cutoff;
         }
 
         private void OnDestroy()
