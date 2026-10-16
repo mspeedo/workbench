@@ -30,6 +30,8 @@ namespace SoRLargerText
         private Harmony harmony;
         private bool dirty;
         private bool handling;
+        private bool hooksInstalled;
+        private bool listenersInstalled;
         private int revision;
         private ConfigEntry<bool> enabled, protectHeadings, logging;
         private ConfigEntry<float> multiplier, smallRatio;
@@ -53,7 +55,7 @@ namespace SoRLargerText
                 "Maximum enlargement of qualifying small text (1.35 = 35% larger).");
             // Deliberately new setting name: prior v0.4/v1.0 ratios cannot
             // silently override the new conservative selection.
-            smallRatio = Config.Bind("General", "SmallToNormalRatio", 0.72f,
+            smallRatio = Config.Bind("General", "SmallToNormalRatio", 0.78f,
                 "Only resize text originally smaller than this fraction of ordinary UI text in its Canvas.");
             protectHeadings = Config.Bind("General", "ProtectHeadingsAndButtons", true,
                 "Leave headers, titles, buttons, logos and big messages at their original size.");
@@ -61,14 +63,39 @@ namespace SoRLargerText
                 "Log enlarged text names/sizes. Off by default.");
             instance = this;
 
+            // Some Unity UI assemblies load after the BepInEx plugin Awake().
+            // AssemblyLoad is event driven: no scene scans or periodic polling.
+            AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
+            TryInstallHooks();
+        }
+
+        private void OnAssemblyLoaded(object sender, AssemblyLoadEventArgs args)
+        {
+            if (hooksInstalled || args.LoadedAssembly == null) return;
+            string name = args.LoadedAssembly.GetName().Name;
+            if (name == "UnityEngine.UI" || name == "UnityEngine.UIElementsModule")
+                TryInstallHooks();
+        }
+
+        private void TryInstallHooks()
+        {
+            if (hooksInstalled) return;
             try
             {
-                foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+                uiType = Type.GetType("UnityEngine.UI.Text, UnityEngine.UI", false);
+                if (uiType == null)
                 {
-                    uiType = a.GetType("UnityEngine.UI.Text", false);
-                    if (uiType != null) break;
+                    foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        uiType = a.GetType("UnityEngine.UI.Text", false);
+                        if (uiType != null) break;
+                    }
                 }
-                if (uiType == null) throw new TypeLoadException("UnityEngine.UI.Text not found");
+                if (uiType == null)
+                {
+                    Logger.LogInfo("Larger Text: waiting for UnityEngine.UI to load.");
+                    return;
+                }
                 fontSizeProp = uiType.GetProperty("fontSize", Props);
                 bestFitProp = uiType.GetProperty("resizeTextForBestFit", Props);
                 if (fontSizeProp == null || !fontSizeProp.CanRead || !fontSizeProp.CanWrite)
@@ -94,8 +121,13 @@ namespace SoRLargerText
                     harmony.Patch(setFontSize, postfix: new HarmonyMethod(typeof(Plugin)
                         .GetMethod("AfterFontSizeChange", BindingFlags.Static | BindingFlags.NonPublic)));
 
-                Canvas.willRenderCanvases += ProcessDirtyUi;
-                SceneManager.sceneLoaded += SceneLoaded;
+                if (!listenersInstalled)
+                {
+                    Canvas.willRenderCanvases += ProcessDirtyUi;
+                    SceneManager.sceneLoaded += SceneLoaded;
+                    listenersInstalled = true;
+                }
+                hooksInstalled = true;
                 Logger.LogInfo("Larger Text v1.2.0 active: text-mesh hooks installed. " +
                                "Zoom=" + multiplier.Value.ToString("F2") +
                                "x, small ratio=" + smallRatio.Value.ToString("F2") +
@@ -281,8 +313,12 @@ namespace SoRLargerText
 
         private void OnDestroy()
         {
-            Canvas.willRenderCanvases -= ProcessDirtyUi;
-            SceneManager.sceneLoaded -= SceneLoaded;
+            AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoaded;
+            if (listenersInstalled)
+            {
+                Canvas.willRenderCanvases -= ProcessDirtyUi;
+                SceneManager.sceneLoaded -= SceneLoaded;
+            }
             if (harmony != null) harmony.UnpatchSelf();
             entries.Clear();
             if (instance == this) instance = null;
