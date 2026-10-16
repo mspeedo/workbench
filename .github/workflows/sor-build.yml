@@ -1,0 +1,32 @@
+name: Build Streets of Rogue mods
+on:
+  push:
+    paths:
+      - 'streets-of-rogue/**'
+      - '.github/workflows/sor-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build UnlimitedRetries
+        run: dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj --configuration Release
+      - name: Build LargerText
+        run: dotnet build streets-of-rogue/LargerText/LargerText.csproj --configuration Release
+      - name: Package only mod DLLs
+        run: |
+          mkdir -p staging/BepInEx/plugins
+          cp streets-of-rogue/UnlimitedRetries/bin/Release/net472/UnlimitedRetries.dll staging/BepInEx/plugins/
+          cp streets-of-rogue/LargerText/bin/Release/net472/LargerText.dll staging/BepInEx/plugins/
+          cd staging
+          zip -r ../SoR-QoL-Mods.zip BepInEx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SoR-QoL-Mods
+          path: SoR-QoL-Mods.zip
