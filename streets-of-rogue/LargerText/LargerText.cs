@@ -7,11 +7,12 @@ using UnityEngine;
 
 namespace SoRLargerText
 {
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "0.4.0")]
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "1.0.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private ConfigEntry<bool> enabled, showOverlay, forceAll, includeTk2d, disableBestFit, logExamples;
         private ConfigEntry<float> multiplier, smallFraction, referencePercentile, scanSeconds;
+        private ConfigEntry<int> configVersion;
         private readonly List<Type> textTypes = new List<Type>();
         private readonly Dictionary<int, Record> textRecords = new Dictionary<int, Record>();
         private readonly Dictionary<int, Record> tkRecords = new Dictionary<int, Record>();
@@ -42,8 +43,8 @@ namespace SoRLargerText
         private void Awake()
         {
             enabled = Config.Bind("General", "Enabled", true, "Enable selective font enlargement.");
-            multiplier = Config.Bind("General", "Multiplier", 1.70f,
-                "Font enlargement multiplier, 1.7 is intentionally noticeable for testing.");
+            multiplier = Config.Bind("General", "Multiplier", 1.50f,
+                "Maximum enlargement for smaller fonts. Default 1.5x; capped at normal-sized text.");
             smallFraction = Config.Bind("General", "SmallTextFraction", 0.82f,
                 "Only fonts whose original visual size is smaller than this fraction of the reference are enlarged. Lower = fewer affected.");
             referencePercentile = Config.Bind("General", "ReferencePercentile", 0.85f,
@@ -52,14 +53,32 @@ namespace SoRLargerText
                 "Include legacy 2D Toolkit labels.");
             disableBestFit = Config.Bind("General", "OverrideBestFitForSmallText", true,
                 "Temporarily disable Unity UI Best Fit on enlarged text, otherwise its automatic sizing can hide the change.");
-            showOverlay = Config.Bind("Diagnostics", "ShowOverlay", true,
-                "Shows a diagnostic box in the upper-left corner. Turn off once tested.");
+            showOverlay = Config.Bind("Diagnostics", "ShowOverlay", false,
+                "Optional diagnostic overlay, disabled by default for normal gameplay.");
             forceAll = Config.Bind("Diagnostics", "ForceAllText", false,
                 "TEST ONLY: enlarge every detected text component, including menu text. Useful to prove the plugin works. Switch off after testing.");
-            logExamples = Config.Bind("Diagnostics", "LogSamples", true,
-                "Print renderer counts, reference sizes, and examples to BepInEx/LogOutput.log every 10 seconds.");
+            logExamples = Config.Bind("Diagnostics", "LogSamples", false,
+                "Optional periodic diagnostic logging (off by default).");
             scanSeconds = Config.Bind("Performance", "ScanSeconds", 0.50f, "Text rescan interval (minimum 0.2 seconds).");
-            Logger.LogWarning("Larger Text v0.4.0 LOADED: diagnostic overlay enabled; see configuration in mspeedo.sor.larger-text.cfg");
+            // BepInEx persists old defaults in its config. Migrate only those
+            // previously-default values once; preserve other user customizations.
+            configVersion = Config.Bind("General", "SettingsVersion", 0,
+                "Internal one-time default migration marker; do not edit.");
+            if (configVersion.Value < 1)
+            {
+                if (Math.Abs(multiplier.Value - 1.70f) < 0.0001f)
+                    multiplier.Value = 1.50f;
+                if (showOverlay.Value)
+                    showOverlay.Value = false;
+                if (logExamples.Value)
+                    logExamples.Value = false;
+                if (forceAll.Value)
+                    forceAll.Value = false; // Don't ship a test-only override enabled.
+                configVersion.Value = 1;
+                Config.Save();
+            }
+            Logger.LogInfo("Larger Text v1.0.0 loaded (zoom=" + multiplier.Value.ToString("F2")
+                + "x, overlay=" + showOverlay.Value + ").");
         }
 
         private void Update()
@@ -104,7 +123,7 @@ namespace SoRLargerText
             if (logExamples.Value && sinceLog >= 10f)
             {
                 sinceLog = 0f;
-                Logger.LogInfo("LargerText v0.4: UI " + uiChanged + "/" + uiFound +
+                Logger.LogInfo("LargerText v1.0: UI " + uiChanged + "/" + uiFound +
                                " changed, reference size=" + uiReference.ToString("F2") +
                                " | tk2d " + tkChanged + "/" + tkFound +
                                " changed, reference size=" + tkReference.ToString("F3") +
@@ -306,7 +325,7 @@ namespace SoRLargerText
                 overlayStyle.wordWrap = true;
             }
             GUI.Box(new Rect(10, 10, 690, 111), "");
-            string display = "Larger Text v0.4 LOADED | " +
+            string display = "Larger Text v1.0 | " +
                 (enabled.Value ? "ON" : "OFF") + (forceAll.Value ? " | FORCE ALL" : "") +
                 "\nUI text: " + uiChanged + "/" + uiFound + " enlarged   tk2d: " +
                 tkChanged + "/" + tkFound + " enlarged" +
