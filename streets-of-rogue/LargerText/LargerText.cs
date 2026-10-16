@@ -7,237 +7,312 @@ using UnityEngine;
 
 namespace SoRLargerText
 {
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "0.3.0")]
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "0.4.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
-        private ConfigEntry<bool> enabled, onlyUi, diagnostic;
-        private ConfigEntry<float> multiplier, interval, tk2dThreshold, tk2dReferencePercentile;
-        private ConfigEntry<int> maxFontSize;
+        private ConfigEntry<bool> enabled, showOverlay, forceAll, includeTk2d, disableBestFit, logExamples;
+        private ConfigEntry<float> multiplier, smallFraction, referencePercentile, scanSeconds;
+        private readonly List<Type> textTypes = new List<Type>();
+        private readonly Dictionary<int, Record> textRecords = new Dictionary<int, Record>();
+        private readonly Dictionary<int, Record> tkRecords = new Dictionary<int, Record>();
+        private float sinceScan, sinceLog, sincePrune;
+        private GUIStyle overlayStyle;
+        private int uiFound, uiChanged, tkFound, tkChanged;
+        private float uiReference, tkReference;
+        private string sample = "No text samples yet";
 
-        private float clock;
-        private bool foundTypes;
-        private readonly List<Type> types = new List<Type>();
-        private readonly Dictionary<int, FontRecord> fontRecords = new Dictionary<int, FontRecord>();
-        private readonly Dictionary<int, Tk2dRecord> tkRecords = new Dictionary<int, Tk2dRecord>();
-
-        private sealed class FontRecord
+        private sealed class Record
         {
             public Component Component;
-            public float Original;
-            public float Applied;
+            public float OriginalFontSize;
+            public float AppliedFontSize;
+            public Vector3 OriginalScale;
+            public Vector3 AppliedScale;
+            public bool HasBestFit, OriginalBestFit;
         }
 
-        private sealed class Tk2dRecord
+        private sealed class Candidate
         {
             public Component Component;
-            public Vector3 Original;
-            public Vector3 Applied;
-        }
-
-        private sealed class Tk2dCandidate
-        {
-            public Component Component;
-            public PropertyInfo Property;
-            public Tk2dRecord Record;
-            public float EffectiveSize;
+            public PropertyInfo SizeProperty;
+            public Record Record;
+            public float VisualSize;
         }
 
         private void Awake()
         {
-            enabled = Config.Bind("General", "Enabled", true, "Enable small-font enlargement.");
-            multiplier = Config.Bind("General", "Multiplier", 1.35f,
-                "Enlargement factor for eligible smaller fonts (1.0 = normal).");
-            maxFontSize = Config.Bind("General", "MaxOriginalFontSize", 18,
-                "Unity UI/TMP/TextMesh: enlarge ONLY original fonts smaller than this size, capping the result at this size. Set below your normal menu font size.");
-            tk2dThreshold = Config.Bind("General", "Tk2dSmallTextFraction", 0.80f,
-                "2D Toolkit: enlarge ONLY text smaller than this fraction of the scene's reference text size (0.80 = 80%).");
-            tk2dReferencePercentile = Config.Bind("General", "Tk2dReferencePercentile", 0.80f,
-                "2D Toolkit: the active text-size percentile used as a normal-sized reference. Lower values protect more menu text.");
-            onlyUi = Config.Bind("General", "OnlyUiNames", false,
-                "Optional filter: only alter text with UI-like ancestor object names.");
-            diagnostic = Config.Bind("Diagnostics", "LogFontSizes", false,
-                "Log up to 20 candidate text sizes per scan (use temporarily for fine tuning).");
-            interval = Config.Bind("Performance", "ScanSeconds", 1f,
-                "Time between scans, at least 0.25 seconds.");
-            Logger.LogInfo("Larger Text v0.3: selective small-font scaling enabled");
+            enabled = Config.Bind("General", "Enabled", true, "Enable selective font enlargement.");
+            multiplier = Config.Bind("General", "Multiplier", 1.70f,
+                "Font enlargement multiplier, 1.7 is intentionally noticeable for testing.");
+            smallFraction = Config.Bind("General", "SmallTextFraction", 0.82f,
+                "Only fonts whose original visual size is smaller than this fraction of the reference are enlarged. Lower = fewer affected.");
+            referencePercentile = Config.Bind("General", "ReferencePercentile", 0.85f,
+                "The percentile of visible text sizes used as the normal-text reference. Usually 0.8-0.9.");
+            includeTk2d = Config.Bind("General", "IncludeTk2dText", true,
+                "Include legacy 2D Toolkit labels.");
+            disableBestFit = Config.Bind("General", "OverrideBestFitForSmallText", true,
+                "Temporarily disable Unity UI Best Fit on enlarged text, otherwise its automatic sizing can hide the change.");
+            showOverlay = Config.Bind("Diagnostics", "ShowOverlay", true,
+                "Shows a diagnostic box in the upper-left corner. Turn off once tested.");
+            forceAll = Config.Bind("Diagnostics", "ForceAllText", false,
+                "TEST ONLY: enlarge every detected text component, including menu text. Useful to prove the plugin works. Switch off after testing.");
+            logExamples = Config.Bind("Diagnostics", "LogSamples", true,
+                "Print renderer counts, reference sizes, and examples to BepInEx/LogOutput.log every 10 seconds.");
+            scanSeconds = Config.Bind("Performance", "ScanSeconds", 0.50f, "Text rescan interval (minimum 0.2 seconds).");
+            Logger.LogWarning("Larger Text v0.4.0 LOADED: diagnostic overlay enabled; see configuration in mspeedo.sor.larger-text.cfg");
         }
 
         private void Update()
         {
-            clock += Time.unscaledDeltaTime;
-            if (clock < Math.Max(0.25f, interval.Value)) return;
-            clock = 0f;
-            if (!foundTypes) DiscoverTypes();
+            sinceScan += Time.unscaledDeltaTime;
+            sinceLog += Time.unscaledDeltaTime;
+            sincePrune += Time.unscaledDeltaTime;
+            if (sinceScan < Mathf.Max(0.2f, scanSeconds.Value)) return;
+            sinceScan = 0f;
+            DiscoverNewTypes();
 
-            var tkCandidates = new List<Tk2dCandidate>();
-            foreach (Type type in types)
+            var ui = new List<Candidate>();
+            var tk = new List<Candidate>();
+            foreach (Type t in textTypes)
             {
                 try
                 {
-                    foreach (UnityEngine.Object obj in Resources.FindObjectsOfTypeAll(type))
+                    foreach (UnityEngine.Object item in Resources.FindObjectsOfTypeAll(t))
                     {
-                        var c = obj as Component;
+                        Component c = item as Component;
                         if (c == null || c.gameObject == null || !c.gameObject.activeInHierarchy)
                             continue;
+                        Behaviour behaviour = c as Behaviour;
+                        if (behaviour != null && !behaviour.enabled) continue;
                         if (!c.gameObject.scene.IsValid()) continue;
-                        if (onlyUi.Value && !LooksLikeUi(c.transform)) continue;
-
-                        if (type.Name == "tk2dTextMesh")
+                        if (t.Name == "tk2dTextMesh")
                         {
-                            CollectTk2d(c, tkCandidates);
+                            if (includeTk2d.Value) CollectTk(c, tk);
                         }
                         else
-                        {
-                            AdjustFontSize(c);
-                        }
+                            CollectUi(c, ui);
                     }
                 }
-                catch (Exception ex)
-                {
-                    Logger.LogWarning("Text scan (" + type.Name + "): " + ex.Message);
-                }
+                catch (Exception e) { Logger.LogWarning("Could not scan " + t.FullName + ": " + e.Message); }
             }
 
-            AdjustTk2d(tkCandidates);
+            uiFound = ui.Count;
+            tkFound = tk.Count;
+            uiChanged = ApplyUi(ui);
+            tkChanged = ApplyTk(tk);
 
-            // Remove references to destroyed Unity objects rather than retaining them indefinitely.
-            var expiredFonts = new List<int>();
-            foreach (var kv in fontRecords)
-                if (kv.Value.Component == null) expiredFonts.Add(kv.Key);
-            foreach (int id in expiredFonts) fontRecords.Remove(id);
-            var expiredTk = new List<int>();
-            foreach (var kv in tkRecords)
-                if (kv.Value.Component == null) expiredTk.Add(kv.Key);
-            foreach (int id in expiredTk) tkRecords.Remove(id);
+            if (logExamples.Value && sinceLog >= 10f)
+            {
+                sinceLog = 0f;
+                Logger.LogInfo("LargerText v0.4: UI " + uiChanged + "/" + uiFound +
+                               " changed, reference size=" + uiReference.ToString("F2") +
+                               " | tk2d " + tkChanged + "/" + tkFound +
+                               " changed, reference size=" + tkReference.ToString("F3") +
+                               " | ForceAllText=" + forceAll.Value + " | sample: " + sample);
+            }
+
+            if (sincePrune >= 60f)
+            {
+                sincePrune = 0f;
+                Prune(textRecords);
+                Prune(tkRecords);
+            }
         }
 
-        private void DiscoverTypes()
+        private void DiscoverNewTypes()
         {
-            foundTypes = true;
-            string[] names = { "tk2dTextMesh", "UnityEngine.UI.Text", "TMPro.TMP_Text", "UnityEngine.TextMesh" };
+            string[] names = { "UnityEngine.UI.Text", "UnityEngine.TextMesh", "TMPro.TMP_Text", "tk2dTextMesh" };
             foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (string n in names)
             {
-                foreach (string name in names)
+                Type t = a.GetType(n, false);
+                if (t != null && typeof(Component).IsAssignableFrom(t) && !textTypes.Contains(t))
                 {
-                    var t = a.GetType(name, false);
-                    if (t != null && typeof(Component).IsAssignableFrom(t) && !types.Contains(t))
-                    {
-                        types.Add(t);
-                        Logger.LogInfo("Text renderer: " + t.FullName);
-                    }
+                    textTypes.Add(t);
+                    Logger.LogInfo("LargerText renderer: " + t.FullName + ", assembly " + a.GetName().Name);
                 }
             }
-            if (types.Count == 0) Logger.LogWarning("No supported text renderers found");
         }
 
-        private void AdjustFontSize(Component c)
+        private void CollectUi(Component c, List<Candidate> items)
         {
-            var p = c.GetType().GetProperty("fontSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (p == null || !p.CanRead || !p.CanWrite ||
-                (p.PropertyType != typeof(int) && p.PropertyType != typeof(float))) return;
-            float actual;
-            try { actual = Convert.ToSingle(p.GetValue(c, null)); }
+            PropertyInfo prop = c.GetType().GetProperty("fontSize",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (prop == null || !prop.CanRead || !prop.CanWrite ||
+                (prop.PropertyType != typeof(int) && prop.PropertyType != typeof(float))) return;
+            float current;
+            try { current = Convert.ToSingle(prop.GetValue(c, null)); }
             catch { return; }
-            if (!(actual > 0f) || float.IsInfinity(actual) || float.IsNaN(actual)) return;
+            if (current <= 0 || float.IsNaN(current) || float.IsInfinity(current)) return;
 
             int id = c.GetInstanceID();
-            FontRecord r;
-            if (!fontRecords.TryGetValue(id, out r) || r.Component != c)
-                fontRecords[id] = r = new FontRecord { Component = c, Original = actual, Applied = actual };
-            else if (Math.Abs(actual - r.Applied) > 0.02f)
-                r.Original = actual; // The game changed its own font size; learn the new baseline.
-
-            float factor = Mathf.Clamp(multiplier.Value, 1f, 2.5f);
-            int cutoff = Math.Max(1, maxFontSize.Value);
-            // This strict less-than comparison protects text at the normal menu font size.
-            float desired = enabled.Value && r.Original < cutoff
-                ? Math.Min(r.Original * factor, cutoff)
-                : r.Original;
-            if (p.PropertyType == typeof(int)) desired = (float)Math.Round(desired);
-            if (Math.Abs(actual - desired) > 0.02f)
+            Record r;
+            if (!textRecords.TryGetValue(id, out r) || r.Component != c)
             {
-                try { p.SetValue(c, p.PropertyType == typeof(int) ? (object)(int)desired : desired, null); }
-                catch { return; }
+                r = new Record { Component = c, OriginalFontSize = current, AppliedFontSize = current };
+                textRecords[id] = r;
+                PropertyInfo fit = GetBestFitProperty(c);
+                if (fit != null)
+                {
+                    try { r.HasBestFit = true; r.OriginalBestFit = (bool)fit.GetValue(c, null); }
+                    catch { r.HasBestFit = false; }
+                }
             }
-            r.Applied = desired;
+            else if (Math.Abs(current - r.AppliedFontSize) > 0.05f)
+            {
+                r.OriginalFontSize = current;
+                r.AppliedFontSize = current;
+            }
+
+            // The previous mod used a fixed fontSize <= 18 threshold. This
+            // game's actual Unity Text fonts can be much larger but rendered
+            // small because of parent Canvas/RectTransform scaling.
+            float visual = Math.Abs(r.OriginalFontSize * c.transform.lossyScale.y);
+            if (visual < 0.001f || float.IsNaN(visual) || float.IsInfinity(visual))
+                visual = r.OriginalFontSize;
+            items.Add(new Candidate { Component = c, SizeProperty = prop, Record = r, VisualSize = visual });
         }
 
-        private void CollectTk2d(Component c, List<Tk2dCandidate> candidates)
+        private void CollectTk(Component c, List<Candidate> items)
         {
-            // tk2dTextMesh exposes scale (Vector3), NOT fontSize. The old plugin
-            // silently skipped it. Read the original text scale and the transform's
-            // inherited scale to estimate its actual visual height.
-            PropertyInfo p = c.GetType().GetProperty("scale", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (p == null || !p.CanRead || !p.CanWrite || p.PropertyType != typeof(Vector3)) return;
-            Vector3 actual;
-            try { actual = (Vector3)p.GetValue(c, null); }
+            PropertyInfo prop = c.GetType().GetProperty("scale",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (prop == null || !prop.CanRead || !prop.CanWrite || prop.PropertyType != typeof(Vector3)) return;
+            Vector3 current;
+            try { current = (Vector3)prop.GetValue(c, null); }
             catch { return; }
-            if (!(Math.Abs(actual.y) > 0.00001f)) return;
-
+            if (Math.Abs(current.y) < 0.00001f) return;
             int id = c.GetInstanceID();
-            Tk2dRecord r;
+            Record r;
             if (!tkRecords.TryGetValue(id, out r) || r.Component != c)
-                tkRecords[id] = r = new Tk2dRecord { Component = c, Original = actual, Applied = actual };
-            else if ((actual - r.Applied).sqrMagnitude > 0.000001f)
-                r.Original = actual;
+            {
+                r = new Record { Component = c, OriginalScale = current, AppliedScale = current };
+                tkRecords[id] = r;
+            }
+            else if ((current - r.AppliedScale).sqrMagnitude > 0.000001f)
+                r.OriginalScale = current;
 
-            float visualHeight = Math.Abs(r.Original.y * c.transform.lossyScale.y);
-            if (visualHeight > 0.000001f && !float.IsInfinity(visualHeight) && !float.IsNaN(visualHeight))
-                candidates.Add(new Tk2dCandidate { Component = c, Property = p, Record = r, EffectiveSize = visualHeight });
+            float visual = Math.Abs(r.OriginalScale.y * c.transform.lossyScale.y);
+            if (visual < 0.000001f || float.IsNaN(visual) || float.IsInfinity(visual)) return;
+            items.Add(new Candidate { Component = c, SizeProperty = prop, Record = r, VisualSize = visual });
         }
 
-        private void AdjustTk2d(List<Tk2dCandidate> candidates)
+        private static PropertyInfo GetBestFitProperty(Component c)
         {
-            if (candidates.Count == 0) return;
-            var heights = new List<float>(candidates.Count);
-            foreach (var c in candidates) heights.Add(c.EffectiveSize);
-            heights.Sort();
-            int index = Math.Max(0, Math.Min(heights.Count - 1,
-                (int)Math.Floor((heights.Count - 1) * Mathf.Clamp(tk2dReferencePercentile.Value, 0.5f, 0.95f))));
-            float referenceSize = heights[index];
-            float threshold = referenceSize * Mathf.Clamp(tk2dThreshold.Value, 0.2f, 0.99f);
-            float factor = Mathf.Clamp(multiplier.Value, 1f, 2.5f);
-            int logged = 0;
+            PropertyInfo p = c.GetType().GetProperty("resizeTextForBestFit", BindingFlags.Public | BindingFlags.Instance);
+            return p != null && p.CanRead && p.CanWrite && p.PropertyType == typeof(bool) ? p : null;
+        }
 
-            foreach (Tk2dCandidate item in candidates)
+        private float Reference(List<Candidate> items)
+        {
+            if (items.Count == 0) return 0f;
+            var sorted = new List<float>(items.Count);
+            foreach (Candidate item in items) sorted.Add(item.VisualSize);
+            sorted.Sort();
+            int index = (int)Math.Floor((sorted.Count - 1) * Mathf.Clamp(referencePercentile.Value, 0.50f, 0.98f));
+            return sorted[index];
+        }
+
+        private float ScaleFor(float size, float reference)
+        {
+            if (!enabled.Value) return 1f;
+            float factor = Mathf.Clamp(multiplier.Value, 1.0f, 3.0f);
+            if (forceAll.Value) return factor;
+            if (reference <= 0f || size >= reference * Mathf.Clamp(smallFraction.Value, 0.10f, 0.99f))
+                return 1f;
+            // Never make small labels larger than their normal-sized peers.
+            return Mathf.Min(factor, reference / size);
+        }
+
+        private int ApplyUi(List<Candidate> items)
+        {
+            float reference = uiReference = Reference(items);
+            int changed = 0;
+            Candidate example = null;
+            foreach (Candidate item in items)
             {
-                // Text already at the normal-size reference is intentionally untouched.
-                float appliedFactor = enabled.Value && item.EffectiveSize < threshold
-                    ? Math.Min(factor, referenceSize / item.EffectiveSize)
-                    : 1f;
-                Vector3 original = item.Record.Original;
-                Vector3 desired = new Vector3(original.x * appliedFactor,
-                                               original.y * appliedFactor,
-                                               original.z);
-                Vector3 actual;
-                try { actual = (Vector3)item.Property.GetValue(item.Component, null); }
-                catch { continue; }
-                if ((desired - actual).sqrMagnitude > 0.000001f)
+                float factor = ScaleFor(item.VisualSize, reference);
+                if (factor > 1.001f) { changed++; if (example == null) example = item; }
+                float desired = item.Record.OriginalFontSize * factor;
+                if (item.SizeProperty.PropertyType == typeof(int))
+                    desired = (float)Math.Round(desired);
+
+                try
                 {
-                    try { item.Property.SetValue(item.Component, desired, null); }
-                    catch { continue; }
+                    // Best Fit clamps the displayed size even when fontSize changes.
+                    // For small labels, disable Best Fit to make scaling observable.
+                    PropertyInfo bestFit = GetBestFitProperty(item.Component);
+                    if (bestFit != null && item.Record.HasBestFit)
+                    {
+                        bool desiredBestFit = item.Record.OriginalBestFit &&
+                            !(factor > 1.001f && disableBestFit.Value);
+                        if ((bool)bestFit.GetValue(item.Component, null) != desiredBestFit)
+                            bestFit.SetValue(item.Component, desiredBestFit, null);
+                    }
+                    float current = Convert.ToSingle(item.SizeProperty.GetValue(item.Component, null));
+                    if (Math.Abs(current - desired) > 0.05f)
+                        item.SizeProperty.SetValue(item.Component,
+                            item.SizeProperty.PropertyType == typeof(int) ? (object)(int)desired : desired, null);
+                    item.Record.AppliedFontSize = desired;
                 }
-                item.Record.Applied = desired;
-                if (diagnostic.Value && logged++ < 20)
-                    Logger.LogInfo("tk2d name=" + item.Component.name +
-                        " originalEffective=" + item.EffectiveSize.ToString("F4") +
-                        " reference=" + referenceSize.ToString("F4") +
-                        " factor=" + appliedFactor.ToString("F2"));
+                catch (Exception e) { Logger.LogDebug("Could not resize UI text: " + e.Message); }
             }
+            if (example != null)
+                sample = "UI name=" + example.Component.gameObject.name +
+                         " baseFont=" + example.Record.OriginalFontSize.ToString("F1") +
+                         " scaled=" + ScaleFor(example.VisualSize, reference).ToString("F2") + "x";
+            else if (items.Count > 0)
+                sample = "No small UI fonts under reference ratio; first font=" + items[0].Record.OriginalFontSize;
+            return changed;
         }
 
-        private static bool LooksLikeUi(Transform node)
+        private int ApplyTk(List<Candidate> items)
         {
-            for (int depth = 0; node != null && depth < 8; depth++, node = node.parent)
+            float reference = tkReference = Reference(items);
+            int changed = 0;
+            foreach (Candidate item in items)
             {
-                string x = node.gameObject.name.ToLowerInvariant();
-                if (x.Contains("menu") || x.Contains("ui") || x.Contains("gui") ||
-                    x.Contains("tool") || x.Contains("desc") || x.Contains("item") ||
-                    x.Contains("inventory") || x.Contains("dialog") || x.Contains("quest") ||
-                    x.Contains("hud") || x.Contains("popup") || x.Contains("trait") ||
-                    x.Contains("canvas") || x.Contains("button")) return true;
+                float factor = ScaleFor(item.VisualSize, reference);
+                if (factor > 1.001f) changed++;
+                Vector3 s = item.Record.OriginalScale;
+                Vector3 desired = new Vector3(s.x * factor, s.y * factor, s.z);
+                try
+                {
+                    Vector3 current = (Vector3)item.SizeProperty.GetValue(item.Component, null);
+                    if ((current - desired).sqrMagnitude > 0.000001f)
+                        item.SizeProperty.SetValue(item.Component, desired, null);
+                    item.Record.AppliedScale = desired;
+                }
+                catch (Exception e) { Logger.LogDebug("Could not resize tk2d: " + e.Message); }
             }
-            return false;
+            return changed;
+        }
+
+        private static void Prune(Dictionary<int, Record> dict)
+        {
+            var dead = new List<int>();
+            foreach (var kv in dict) if (kv.Value.Component == null) dead.Add(kv.Key);
+            foreach (int id in dead) dict.Remove(id);
+        }
+
+        private void OnGUI()
+        {
+            if (showOverlay == null || !showOverlay.Value) return;
+            if (overlayStyle == null)
+            {
+                overlayStyle = new GUIStyle(GUI.skin.label);
+                overlayStyle.fontSize = 19;
+                overlayStyle.normal.textColor = Color.white;
+                overlayStyle.wordWrap = true;
+            }
+            GUI.Box(new Rect(10, 10, 690, 111), "");
+            string display = "Larger Text v0.4 LOADED | " +
+                (enabled.Value ? "ON" : "OFF") + (forceAll.Value ? " | FORCE ALL" : "") +
+                "\nUI text: " + uiChanged + "/" + uiFound + " enlarged   tk2d: " +
+                tkChanged + "/" + tkFound + " enlarged" +
+                "\n" + sample +
+                "\nConfig: BepInEx/config/mspeedo.sor.larger-text.cfg";
+            GUI.Label(new Rect(24, 13, 660, 106), display, overlayStyle);
         }
     }
 }
