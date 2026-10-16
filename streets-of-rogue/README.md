@@ -1,37 +1,42 @@
-# Streets of Rogue 1 – BepInEx 5 quality-of-life mods
+# Streets of Rogue 1 — BepInEx 5 mods
 
-Two **independent** plugins for the original *Streets of Rogue*, designed for Windows or SteamOS via Proton.
+Two independent plugins for the original **Streets of Rogue** using BepInEx 5 (Windows / SteamOS via Proton).
 
-* **UnlimitedRetries**: works with the game's built-in **Continue?** mutator. Before `SaveGame.Save`, refreshes `GameController.sessionData.continues` to 10,000 so that the game's existing checkpoint / floor restore system can still handle death and reloading. Does not enable Continue? when the mutator is absent. Does not override **End Run**. The 10,000 per-floor budget is effectively unlimited; using an intentionally finite number avoids overflow.
-* **LargerText**: enlarges small Unity UI, TMPro and tk2d text (the game contains `tk2dTextMesh`), default 1.35x. Uses the `fontSize` property rather than changing transforms, so sprites and other UI content should not be scaled unintentionally.
+## LargerText v1.0.0 — production defaults
+
+Based on the **v0.4 text-scaling implementation confirmed to work in-game**. No changes were made to the font detection/scaling algorithm in v1.0, only defaults, logging and config migration.
+
+- **Multiplier = 1.50** (maximum 150% of original size)
+- **SmallTextFraction = 0.82** (enlarge only text smaller than 82% of the scene reference font size)
+- **ReferencePercentile = 0.85** (normal-size text reference)
+- **ShowOverlay = false** by default (optional diagnostic overlay can still be enabled)
+- **LogSamples = false** by default (optional diagnostic logging can still be enabled)
+- **ForceAllText = false** (diagnostic force-all mode disabled)
+- **ScanSeconds = 0.5**
+
+Works with `UnityEngine.UI.Text`, `UnityEngine.TextMesh`, `TMPro.TMP_Text`, and `tk2dTextMesh`. Scans and scales only active, enabled scene components. For Unity text, uses fontSize and optional Best Fit override; for tk2d, uses component-local mesh scale. Existing large menu text stays unchanged when `ForceAllText = false`.
+
+**Existing configuration migration:** BepInEx preserves configured values across DLL updates. The plugin's first v1.0 startup updates old v0.4 default values: `Multiplier = 1.70` to `1.50`, `ShowOverlay = true` to `false`, `LogSamples = true` to `false`, and disables `ForceAllText`. Other user choices remain unchanged (for example a prior custom multiplier of 1.35 will stay 1.35). Migration is saved once via `SettingsVersion`. You can always edit `BepInEx/config/mspeedo.sor.larger-text.cfg` if you prefer another zoom level.
+
+## UnlimitedRetries v0.2.0 — unchanged
+
+Works with the built-in **Continue?** mutator. Replenishes `SessionData.continues` to 10,000 so the game's original continue/restore workflow can repeat effectively indefinitely. Requires the mutator to be selected. A manual restart-floor button is **not** implemented.
 
 ## Install
-1. Install BepInEx **5 Windows x64** in your game's directory, alongside `StreetsOfRogue.exe`.
-2. Under Steam/Proton launch options: `WINEDLLOVERRIDES="winhttp=n,b" %command%`
-3. Copy `UnlimitedRetries.dll` and `LargerText.dll` into `Streets of Rogue/BepInEx/plugins/`.
-4. Start the game and inspect `BepInEx/LogOutput.log`. Settings appear under `BepInEx/config/mspeedo.sor.*.cfg`.
-5. In the game's mutator selection, enable **Continue?** before starting the run. It begins working only after completing floor 1, just as in vanilla.
 
-### Testing caveats
-These are **beta builds**. Game assembly metadata was inspected from the user's October 2026 Streets of Rogue binaries, but in-game operation must still be tested. Initially back up saves, and test each plugin separately. The font plugin may cause text clipping because original UI layouts were not designed for larger labels; reduce its multiplier or tighten `MaxOriginalFontSize` as needed. The retry plugin intentionally does not alter other game rules or remove death/restore UI. The **manual restart floor without dying** feature is not implemented.
+1. Install BepInEx **5 Windows x64** in the game's directory, alongside `StreetsOfRogue.exe`.
+2. Under Steam/Proton launch options, set `WINEDLLOVERRIDES="winhttp=n,b" %command%`.
+3. Copy `LargerText.dll` and/or `UnlimitedRetries.dll` to `Streets of Rogue/BepInEx/plugins/`.
+4. Launch the game. Settings are saved in `BepInEx/config/mspeedo.sor.larger-text.cfg` and `BepInEx/config/mspeedo.sor.unlimited-retries.cfg`.
+5. To use unlimited retries, enable **Continue?** in mutators before starting a run.
+
+**Testing and caveats:** v0.4 font scaling was confirmed functional in-game. v1.0 has new defaults but still requires in-game validation. Some enlarged text may clip because fixed game UI layout regions do not grow. Back up game saves before using experimental retry mechanics.
 
 ## Build
+
 ```bash
 dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj -c Release
 dotnet build streets-of-rogue/LargerText/LargerText.csproj -c Release
 ```
-Uses public NuGet reference packages; **no proprietary game assemblies are committed** to this repository. The game assembly metadata is only used for understanding internal names and behavior. GitHub Actions publishes two ready-to-install DLLs in a ZIP, not Unity or game DLL dependencies.
 
-
-## Selective small-font mode (LargerText v0.3)
-
-**The normal menu font stays unchanged.** The mod now works in two paths:
-
-- Unity UI, TextMesh, TMP: scales only text with an original font size strictly below `MaxOriginalFontSize` (default **18**). It also caps the enlarged text at 18, so small text cannot become larger than the menu cutoff.
-- 2D Toolkit `tk2dTextMesh` (used by Streets of Rogue): scales the actual text mesh, **not** its parent UI transform. A sampled large-text reference is computed every scan; only text below `Tk2dSmallTextFraction` (default **0.80**) of that reference is enlarged. The enlarged result is capped at the reference size. Text at or near the reference stays unchanged.
-
-The original 1.35× `Multiplier` remains configurable. To make fewer elements eligible, lower `MaxOriginalFontSize` to 16, or lower `Tk2dSmallTextFraction` to 0.7. Because the game uses multiple text renderers and sizes, this is a **heuristic**; compare in-game menus and item descriptions and tune as needed. Enable `LogFontSizes` temporarily for tk2d measurements in `BepInEx/LogOutput.log`.
-
-**Config upgrade note:** BepInEx preserves existing settings. If you previously ran v0.2 with `MaxOriginalFontSize = 22`, manually change it to `18` in `BepInEx/config/mspeedo.sor.larger-text.cfg`. Restart the game.
-
-Install only the updated `LargerText.dll` to upgrade text scaling; `UnlimitedRetries.dll` is unchanged.
+The GitHub Actions workflow builds against public NuGet reference packages and uploads an installable ZIP. **No proprietary game DLLs are committed to this repository.**
