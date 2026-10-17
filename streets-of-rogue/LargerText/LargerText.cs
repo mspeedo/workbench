@@ -10,12 +10,12 @@ using UnityEngine.SceneManagement;
 
 namespace SoRLargerText
 {
-    // v2.2: retain v2.0's working initialization/scan mechanism.
-    // Never override Unity's Best Fit, and prevent any UI font increase
-    // that would overflow the text rectangle.
+    // v2.3: retain v2.2's working initialization/scan mechanism.
+    // Respect Unity Best Fit and native overflow settings; only block growth
+    // when it would introduce real truncation in a fixed-height UI label.
     // Determine large-size tiers once at scene load (not periodically).
     // No startup settings migrations, overlay or repeated scans.
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.2.0")]
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.3.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private static readonly BindingFlags Props =
@@ -58,7 +58,7 @@ namespace SoRLargerText
             protectLargeText = Config.Bind("General", "ProtectLargeText", true,
                 "Keep the biggest text and obvious titles/headings at their original sizes.");
             safeFit = Config.Bind("General", "PreventTextClipping", true,
-                "Keep original font size if enlargement overflows the Unity UI text rectangle.");
+                "Only prevent enlargement when Unity is configured to truncate text and the enlarged text would exceed its height. Best Fit and Overflow text can enlarge.");
             // No settings migrations or writes. Existing Multiplier value is honored.
             harmony = new Harmony("mspeedo.sor.larger-text");
 
@@ -66,7 +66,7 @@ namespace SoRLargerText
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
             DiscoverRenderersAndHooks();
             StartCoroutine(ScanAfterSceneLoad());
-            Logger.LogInfo("Larger Text v2.2 loaded: zoom " + multiplier.Value.ToString("F2") +
+            Logger.LogInfo("Larger Text v2.3 loaded: zoom " + multiplier.Value.ToString("F2") +
                            "x; large-text protection " + protectLargeText.Value +
                            "; one scene scan, no periodic polling.");
         }
@@ -331,12 +331,13 @@ namespace SoRLargerText
                     }
                 }
 
-                // Check even if fontSize did not change on this call:
-                // dialogue/mutator text itself can become longer in set_text.
+                // Run the guard for all UI text types, including dynamic
+                // menu labels, tooltips and dialogues. It only vetoes actual
+                // truncate-mode overflow; no category-specific exclusions.
                 if (zoom > 1f && wantedFont > entry.OriginalFont &&
                     safeFit.Value && uiTextType != null &&
                     uiTextType.IsInstanceOfType(component) &&
-                    WouldClipText(component, type))
+                    WouldClipText(component, type, entry))
                 {
                     // A bigger text mesh would not fit its RectTransform.
                     // Restore the game's actual original size instead of
@@ -364,26 +365,72 @@ namespace SoRLargerText
             }
         }
 
-        private bool WouldClipText(Component component, Type type)
+        private bool WouldClipText(Component component, Type type, Entry entry)
         {
             try
             {
-                var rect = component.transform as RectTransform;
+                // The previous guard used preferredHeight > rect.height for
+                // every text component. That is incorrect for Overflow mode
+                // and Best Fit and excluded many perfectly readable labels.
+                // Let Unity handle both cases using its own text pipeline.
+                PropertyInfo bestFit = type.GetProperty("resizeTextForBestFit", Props);
+                if (bestFit != null && bestFit.CanRead &&
+                    (bool)bestFit.GetValue(component, null))
+                    return false;
+
+                PropertyInfo verticalOverflow = type.GetProperty("verticalOverflow", Props);
+                if (verticalOverflow == null || !verticalOverflow.CanRead ||
+                    verticalOverflow.GetValue(component, null).ToString() != "Truncate")
+                    return false;
+
+                RectTransform rect = component.transform as RectTransform;
                 if (rect == null) return false;
                 float available = rect.rect.height;
-                if (available <= 1f) return false; // Layout hasn't settled yet.
+                if (available <= 1f) return false; // Layout has not settled.
 
-                var textProperty = type.GetProperty("text", Props);
-                string text = textProperty != null ? textProperty.GetValue(component, null) as string : null;
-                if (string.IsNullOrEmpty(text)) return false;
+                PropertyInfo textProperty = type.GetProperty("text", Props);
+                string content = textProperty != null
+                    ? textProperty.GetValue(component, null) as string : null;
+                if (string.IsNullOrEmpty(content)) return false;
 
-                // Unity's preferredHeight is computed using the real text,
-                // font and wrapping settings, in RectTransform units.
                 PropertyInfo heightProperty = type.GetProperty("preferredHeight", Props);
                 if (heightProperty == null || !heightProperty.CanRead) return false;
-                float preferred = Convert.ToSingle(heightProperty.GetValue(component, null));
-                if (float.IsInfinity(preferred) || float.IsNaN(preferred)) return false;
-                return preferred > available + 0.5f;
+
+                float enlargedHeight = Convert.ToSingle(heightProperty.GetValue(component, null));
+                if (float.IsNaN(enlargedHeight) || float.IsInfinity(enlargedHeight))
+                    return false;
+                if (enlargedHeight <= available + 0.5f)
+                    return false; // The enlarged label still fits. Keep it.
+
+                // When Unity reports an overflow for the enlarged candidate,
+                // check whether it was already reporting the same overflow
+                // for the original font. This avoids classifying an existing
+                // unconstrained layout as a new clipping regression.
+                PropertyInfo font = type.GetProperty("fontSize", Props);
+                if (font == null || !font.CanRead || !font.CanWrite) return false;
+                object enlarged = font.GetValue(component, null);
+                float originalHeight;
+                internalWrite = true;
+                try
+                {
+                    font.SetValue(component, (int)Math.Round(entry.OriginalFont), null);
+                    originalHeight = Convert.ToSingle(heightProperty.GetValue(component, null));
+                }
+                finally
+                {
+                    try { font.SetValue(component, enlarged, null); }
+                    finally { internalWrite = false; }
+                }
+
+                if (float.IsNaN(originalHeight) || float.IsInfinity(originalHeight))
+                    return false;
+
+                // If even vanilla is reported as overflowing, preferredHeight
+                // cannot establish that our increase introduced clipping;
+                // leave the label enlarged. Truncation introduced by zoom is
+                // what we can safely detect and prevent.
+                return originalHeight <= available + 0.5f &&
+                       enlargedHeight > available + 0.5f;
             }
             catch (Exception e)
             {
