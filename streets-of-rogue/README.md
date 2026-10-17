@@ -1,33 +1,39 @@
-# Streets of Rogue 1 — BepInEx 5 quality-of-life mods
+# Streets of Rogue 1 — BepInEx 5 plugins
 
-## LargerText v2.2.0 — prevents missing/clipped labels
+## LargerText v2.3.0 — layout-aware zoom
 
-v2.1.0 introduced a visibility regression: even when a label originally used Unity UI **Best Fit**, the plugin disabled it for enlarged text. Dialogue, mutator selection, and menus have fixed-size rectangles; Unity can truncate text that no longer fits. v2.2.0 preserves Best Fit instead of overriding it, and checks Unity UI text's preferred height against its RectTransform height. If enlargement would exceed the rectangle, the label is returned to its original font size.
+This version builds on v2.2.0, which the user confirmed kept text visible. It addresses the over-conservative `PreventTextClipping` guard that also suppressed enlargement for modifier descriptions and many other UI labels. There are **no menu-specific or modifier-specific exceptions**.
 
-The fit check runs whenever the text changes as well, not only when the font-size property changes. This protects longer replacement strings in an existing dialogue label.
+### Defaults
 
-### Behavior
+- `Multiplier = 1.20` — increase eligible text by up to 20%.
+- `ProtectLargeText = true` — title/heading protection and a one-time large-font tier per scene, as in v2.1/v2.2.
+- `PreventTextClipping = true` — protect only genuine new clipping introduced by the mod.
 
-- Default **Multiplier = 1.20**, enlarging eligible text by 20%.
-- **ProtectLargeText = true**: protects names containing title/header/heading/logo/banner etc., plus the clearly larger size tier calculated once per scene from original sizes.
-- **PreventTextClipping = true**: preserves `resizeTextForBestFit` and reverts text to its original size if a larger label's `preferredHeight` exceeds its available `RectTransform` height.
-- **No periodic polling:** retains the v2.0 scene-load scan and UI text event hooks. No `Update()` and no overlay.
-- **No settings migration** or automatic multiplier rewriting. Existing BepInEx configuration values take precedence.
-- If a text label cannot safely fit enlarged, it deliberately stays its original size rather than disappearing.
+### How v2.3's clipping guard works
 
-*This is an in-game unverified build. Unity's layout methods and clipping rules vary with the game's UI; please test dialogues, mutators, main menu headings, and long descriptions. Some screens may still need more targeted adjustments.*
+For **all Unity UI text components**:
+
+1. Leave the game's original `resizeTextForBestFit` setting intact. If Best Fit is enabled, let Unity handle fitting; do not reject the change solely because `preferredHeight` exceeds the rectangle.
+2. If Unity explicitly uses `verticalOverflow = Overflow`, do **not** apply an inappropriate rectangle-height cutoff: the text is designed to extend beyond its nominal UI rectangle.
+3. If Unity uses `verticalOverflow = Truncate` without Best Fit, check whether the enlarged text height exceeds its real text rectangle.
+4. When that happens, compare against the same text at the **original font size**. Only fall back if the original fit and the enlargement would newly cause truncation. The measurement temporarily changes the fontSize within a re-entrancy guard, restores the enlarged size, and only runs for suspected clipping.
+
+This guards all labels, descriptions, dialogue, and menu elements using the same rule. It avoids the previous mistake of treating every `preferredHeight > rect.height` as a failure even when the game's layout intentionally allows overflow or adjusts font sizes.
+
+### Performance
+
+Keeps the **v2.0** startup/scene-load scan and event hooks, which worked in the game. No 0.5-second recurring scans, no `Update()`, no overlay, and no settings migration.
 
 ### Install
 
-With the game closed, replace `<game>/BepInEx/plugins/LargerText.dll`. To ensure `Multiplier = 1.2`, either edit that value in `<game>/BepInEx/config/mspeedo.sor.larger-text.cfg` or delete this config file (with the game closed) to use the latest defaults. Do not install two versions of `LargerText.dll` simultaneously.
+Replace `BepInEx/plugins/LargerText.dll`. To restore v2.3 defaults, while the game is closed delete only `BepInEx/config/mspeedo.sor.larger-text.cfg`, or manually set `Multiplier = 1.2`, `ProtectLargeText = true`, and `PreventTextClipping = true` in the config.
 
-The `BepInEx/LogOutput.log` should show `Larger Text v2.2 loaded`. For isolation, `ProtectLargeText = false` disables the large-text filter while keeping the clipping safeguard enabled.
-
-If any text remains absent, try restoring the original v2.0 plugin or removing LargerText.dll to restore the game's UI, then provide a screenshot and `BepInEx/LogOutput.log`.
+This version has been compiled, but the revised clipping logic still needs in-game testing.
 
 ## UnlimitedRetries v0.2.0 — unchanged
 
-Uses the game's built-in **Continue?** mutator and replenishes the continues counter for effectively unlimited floor retries. Requires the mutator; manual restart without death is not implemented.
+Works with the game's built-in **Continue?** mutator by replenishing its active counter. Manual restart of the current floor without dying is not implemented.
 
 ## Build
 
@@ -36,4 +42,4 @@ dotnet build streets-of-rogue/LargerText/LargerText.csproj -c Release
 dotnet build streets-of-rogue/UnlimitedRetries/UnlimitedRetries.csproj -c Release
 ```
 
-GitHub Actions packages both DLLs using public reference assemblies; copyrighted game DLLs are not committed.
+Compiled by GitHub Actions using public NuGet references only, with no proprietary game DLLs in the repository.
