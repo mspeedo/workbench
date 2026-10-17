@@ -10,12 +10,13 @@ using UnityEngine.SceneManagement;
 
 namespace SoRLargerText
 {
-    // v2.3: retain v2.2's working initialization/scan mechanism.
-    // Respect Unity Best Fit and native overflow settings; only block growth
-    // when it would introduce real truncation in a fixed-height UI label.
+    // v2.4: retain the working v2.0 scene-load/event mechanism.
+    // Allow Unity UI Best Fit to increase its own maximum font size instead of
+    // changing only fontSize, which Best Fit can silently override.
+    // Diagnostic decisions are logged on text events, never in a polling loop.
     // Determine large-size tiers once at scene load (not periodically).
     // No startup settings migrations, overlay or repeated scans.
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.3.0")]
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.4.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private static readonly BindingFlags Props =
@@ -29,6 +30,9 @@ namespace SoRLargerText
         private ConfigEntry<float> multiplier;
         private ConfigEntry<bool> protectLargeText;
         private ConfigEntry<bool> safeFit;
+        private ConfigEntry<bool> logDecisions;
+        private ConfigEntry<string> logFilter;
+        private int diagnosticLines;
         // Separate thresholds for each renderer: tk2d scale cannot be
         // meaningfully compared to a Unity UI fontSize.
         private readonly Dictionary<string, float> largeSizeCutoffs =
@@ -47,6 +51,10 @@ namespace SoRLargerText
             public bool Tk2d;
             public bool OriginalBestFit;
             public bool HasBestFit;
+            public bool HasBestFitMaximum;
+            public int OriginalBestFitMaximum;
+            public int AppliedBestFitMaximum;
+            public string LastDiagnostic;
         }
 
         private void Awake()
@@ -59,6 +67,10 @@ namespace SoRLargerText
                 "Keep the biggest text and obvious titles/headings at their original sizes.");
             safeFit = Config.Bind("General", "PreventTextClipping", true,
                 "Only prevent enlargement when Unity is configured to truncate text and the enlarged text would exceed its height. Best Fit and Overflow text can enlarge.");
+            logDecisions = Config.Bind("Diagnostics", "LogTextDecisions", true,
+                "Temporary diagnostics: log each text element's original size, fitting mode, and why it was enlarged or skipped. Disable after testing.");
+            logFilter = Config.Bind("Diagnostics", "TextFilter", "",
+                "Optional case-insensitive text/name filter for diagnostic output; blank logs all text up to the log limit.");
             // No settings migrations or writes. Existing Multiplier value is honored.
             harmony = new Harmony("mspeedo.sor.larger-text");
 
@@ -66,7 +78,7 @@ namespace SoRLargerText
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
             DiscoverRenderersAndHooks();
             StartCoroutine(ScanAfterSceneLoad());
-            Logger.LogInfo("Larger Text v2.3 loaded: zoom " + multiplier.Value.ToString("F2") +
+            Logger.LogInfo("Larger Text v2.4 loaded: zoom " + multiplier.Value.ToString("F2") +
                            "x; large-text protection " + protectLargeText.Value +
                            "; one scene scan, no periodic polling.");
         }
@@ -172,6 +184,7 @@ namespace SoRLargerText
             foreach (int id in destroyed)
                 known.Remove(id);
             largeSizeCutoffs.Clear();
+            diagnosticLines = 0;
             StartCoroutine(ScanAfterSceneLoad());
         }
 
@@ -270,13 +283,22 @@ namespace SoRLargerText
                                 entry.OriginalBestFit = (bool)bestFit.GetValue(component, null);
                                 entry.HasBestFit = true;
                             }
+                            PropertyInfo maxProp = type.GetProperty("resizeTextMaxSize", Props);
+                            if (maxProp != null && maxProp.CanRead && maxProp.CanWrite &&
+                                maxProp.PropertyType == typeof(int))
+                            {
+                                entry.OriginalBestFitMaximum = (int)maxProp.GetValue(component, null);
+                                entry.AppliedBestFitMaximum = entry.OriginalBestFitMaximum;
+                                entry.HasBestFitMaximum = true;
+                            }
                         }
                     }
                 }
                 catch { known.Remove(id); return false; }
             }
-            float zoom = IsLargeText(component, entry) ? 1f :
-                Mathf.Clamp(multiplier.Value, 1f, 3f);
+            string protectionReason = LargeTextReason(component);
+            float zoom = protectionReason == null ? Mathf.Clamp(multiplier.Value, 1f, 3f) : 1f;
+            string reason = protectionReason ?? "enlarged";
             try
             {
                 if (tk2d)
@@ -286,11 +308,16 @@ namespace SoRLargerText
                         entry.OriginalScale = current; // Game changed its value.
                     Vector3 original = entry.OriginalScale;
                     Vector3 wanted = new Vector3(original.x * zoom, original.y * zoom, original.z);
-                    if ((current - wanted).sqrMagnitude < 0.000001f) return false;
+                    if ((current - wanted).sqrMagnitude < 0.000001f)
+                    {
+                        LogDecision(component, entry, reason, zoom, "tk2d", 0f, 0f);
+                        return false;
+                    }
                     internalWrite = true;
                     try { property.SetValue(component, wanted, null); }
                     finally { internalWrite = false; }
                     entry.AppliedScale = wanted;
+                    LogDecision(component, entry, reason, zoom, "tk2d", 0f, 0f);
                     return true;
                 }
                 if (property.PropertyType != typeof(int) && property.PropertyType != typeof(float))
@@ -314,9 +341,10 @@ namespace SoRLargerText
                     finally { internalWrite = false; }
                 }
 
-                // Never switch off resizeTextForBestFit! Doing that caused
-                // long dialogue and mutator labels to disappear. If the game
-                // originally used Best Fit, leave it in charge of layout.
+                // Best Fit has an INDEPENDENT max font size. Changing fontSize
+                // alone often makes no visual difference because that maximum
+                // still clamps the generated text. Let Best Fit pick the actual
+                // size within its existing rectangle, but allow a higher ceiling.
                 if (entry.HasBestFit && entry.OriginalBestFit)
                 {
                     PropertyInfo bestFit = type.GetProperty("resizeTextForBestFit", Props);
@@ -329,33 +357,84 @@ namespace SoRLargerText
                         }
                         catch { }
                     }
+                    if (entry.HasBestFitMaximum)
+                    {
+                        PropertyInfo maxProp = type.GetProperty("resizeTextMaxSize", Props);
+                        if (maxProp != null)
+                        {
+                            try
+                            {
+                                int currentMax = (int)maxProp.GetValue(component, null);
+                                if (currentMax != entry.AppliedBestFitMaximum)
+                                    entry.OriginalBestFitMaximum = currentMax;
+                                int desiredMax = Math.Max(1, (int)Math.Round(
+                                    entry.OriginalBestFitMaximum * zoom));
+                                if (currentMax != desiredMax)
+                                {
+                                    internalWrite = true;
+                                    try { maxProp.SetValue(component, desiredMax, null); }
+                                    finally { internalWrite = false; }
+                                }
+                                entry.AppliedBestFitMaximum = desiredMax;
+                                reason = protectionReason ?? "bestfit-max-adjusted";
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogDebug("Best Fit maximum: " + ex.Message);
+                                reason = "bestfit-max-failed";
+                            }
+                        }
+                    }
                 }
 
                 // Run the guard for all UI text types, including dynamic
                 // menu labels, tooltips and dialogues. It only vetoes actual
                 // truncate-mode overflow; no category-specific exclusions.
+                float rectHeight = 0f, preferredHeight = 0f;
                 if (zoom > 1f && wantedFont > entry.OriginalFont &&
                     safeFit.Value && uiTextType != null &&
-                    uiTextType.IsInstanceOfType(component) &&
-                    WouldClipText(component, type, entry))
+                    uiTextType.IsInstanceOfType(component))
                 {
-                    // A bigger text mesh would not fit its RectTransform.
-                    // Restore the game's actual original size instead of
-                    // risking a completely invisible label.
-                    float fallback = entry.OriginalFont;
-                    internalWrite = true;
-                    try
+                    float originalHeight;
+                    if (WouldClipText(component, type, entry,
+                            out rectHeight, out preferredHeight, out originalHeight))
                     {
-                        property.SetValue(component,
-                            property.PropertyType == typeof(int)
-                                ? (object)(int)Math.Round(fallback) : fallback, null);
+                        // Try all intermediate integer font sizes. Revert only
+                        // if not even 1 px of enlargement fits the real label
+                        // rectangle. This replaces v2.3's all-or-nothing veto.
+                        int lower = (int)Math.Round(entry.OriginalFont);
+                        int upper = (int)Math.Round(wantedFont);
+                        int fitting = lower;
+                        PropertyInfo h = type.GetProperty("preferredHeight", Props);
+                        for (int candidate = upper - 1; candidate > lower; --candidate)
+                        {
+                            internalWrite = true;
+                            try { property.SetValue(component, candidate, null); }
+                            finally { internalWrite = false; }
+                            float test = Convert.ToSingle(h.GetValue(component, null));
+                            if (!float.IsNaN(test) && !float.IsInfinity(test) &&
+                                test <= rectHeight + 0.5f)
+                            {
+                                fitting = candidate;
+                                break;
+                            }
+                        }
+                        // Apply the highest safe fit (possibly vanilla).
+                        internalWrite = true;
+                        try { property.SetValue(component, fitting, null); }
+                        finally { internalWrite = false; }
+                        wantedFont = fitting;
+                        reason = fitting > lower ? "partially-fitted" : "new-truncation";
+                        changed = fitting > lower;
                     }
-                    finally { internalWrite = false; }
-                    wantedFont = fallback;
-                    changed = false;
+                    else if (reason == "enlarged" && entry.HasBestFit && entry.OriginalBestFit)
+                    {
+                        reason = "bestfit";
+                    }
                 }
 
                 entry.AppliedFont = wantedFont;
+                LogDecision(component, entry, reason, zoom, "font", rectHeight, preferredHeight);
                 return changed;
             }
             catch (Exception ex)
@@ -365,8 +444,12 @@ namespace SoRLargerText
             }
         }
 
-        private bool WouldClipText(Component component, Type type, Entry entry)
+        private bool WouldClipText(Component component, Type type, Entry entry,
+            out float available, out float enlargedHeight, out float originalHeight)
         {
+            available = 0f;
+            enlargedHeight = 0f;
+            originalHeight = 0f;
             try
             {
                 // The previous guard used preferredHeight > rect.height for
@@ -385,7 +468,7 @@ namespace SoRLargerText
 
                 RectTransform rect = component.transform as RectTransform;
                 if (rect == null) return false;
-                float available = rect.rect.height;
+                available = rect.rect.height;
                 if (available <= 1f) return false; // Layout has not settled.
 
                 PropertyInfo textProperty = type.GetProperty("text", Props);
@@ -396,7 +479,7 @@ namespace SoRLargerText
                 PropertyInfo heightProperty = type.GetProperty("preferredHeight", Props);
                 if (heightProperty == null || !heightProperty.CanRead) return false;
 
-                float enlargedHeight = Convert.ToSingle(heightProperty.GetValue(component, null));
+                enlargedHeight = Convert.ToSingle(heightProperty.GetValue(component, null));
                 if (float.IsNaN(enlargedHeight) || float.IsInfinity(enlargedHeight))
                     return false;
                 if (enlargedHeight <= available + 0.5f)
@@ -409,7 +492,6 @@ namespace SoRLargerText
                 PropertyInfo font = type.GetProperty("fontSize", Props);
                 if (font == null || !font.CanRead || !font.CanWrite) return false;
                 object enlarged = font.GetValue(component, null);
-                float originalHeight;
                 internalWrite = true;
                 try
                 {
@@ -473,11 +555,10 @@ namespace SoRLargerText
             catch { return false; }
         }
 
-        private bool IsLargeText(Component component, Entry entry)
+        // null means eligible; otherwise a specific, diagnosable reason.
+        private string LargeTextReason(Component component)
         {
-            if (!protectLargeText.Value) return false;
-            // Explicit title protection also applies to newly created UI
-            // whose renderer has not yet been included in a scene scan.
+            if (!protectLargeText.Value) return null;
             Transform t = component.transform;
             for (int i = 0; i < 3 && t != null; i++, t = t.parent)
             {
@@ -486,13 +567,54 @@ namespace SoRLargerText
                     n.Contains("heading") || n.Contains("logo") ||
                     n.Contains("bigtext") || n.Contains("largetext") ||
                     n.Contains("banner"))
-                    return true;
+                    return "protected-name:" + n;
             }
             float cutoff;
             float size;
-            return largeSizeCutoffs.TryGetValue(RendererKey(component), out cutoff) &&
-                TryGetOriginalVisualSize(component, out size) &&
-                size >= cutoff;
+            if (largeSizeCutoffs.TryGetValue(RendererKey(component), out cutoff) &&
+                TryGetOriginalVisualSize(component, out size) && size >= cutoff)
+                return "protected-large-tier:" + cutoff.ToString("F2");
+            return null;
+        }
+
+        private void LogDecision(Component c, Entry e, string reason,
+            float factor, string renderer, float rectHeight, float preferred)
+        {
+            if (!logDecisions.Value || diagnosticLines >= 1500) return;
+            string preview = "";
+            if (!e.Tk2d)
+            {
+                try
+                {
+                    PropertyInfo p = c.GetType().GetProperty("text", Props);
+                    preview = p == null ? "" : p.GetValue(c, null) as string ?? "";
+                }
+                catch { }
+            }
+            string filter = logFilter.Value;
+            if (!string.IsNullOrEmpty(filter) &&
+                c.name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0 &&
+                preview.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
+                return;
+            preview = preview.Replace('\n', ' ').Replace('\r', ' ');
+            if (preview.Length > 90) preview = preview.Substring(0, 90) + "...";
+            bool fit = e.HasBestFit && e.OriginalBestFit;
+            string signature = preview + "|" + reason + "|" + e.AppliedFont +
+                "|" + e.AppliedBestFitMaximum + "|" + rectHeight.ToString("F1");
+            if (signature == e.LastDiagnostic) return;
+            e.LastDiagnostic = signature;
+            diagnosticLines++;
+
+            Logger.LogInfo("[LT-DIAG] id=" + c.GetInstanceID() +
+                " name='" + c.gameObject.name + "' renderer=" + renderer +
+                " reason=" + reason + " multiplier=" + factor.ToString("F2") +
+                " original=" + e.OriginalFont.ToString("F1") +
+                " applied=" + e.AppliedFont.ToString("F1") +
+                " bestFit=" + fit + " bestFitMaxOriginal=" + e.OriginalBestFitMaximum +
+                " bestFitMaxApplied=" + e.AppliedBestFitMaximum +
+                " rectHeight=" + rectHeight.ToString("F1") +
+                " preferredHeight=" + preferred.ToString("F1") +
+                " text='" + preview + "'");
         }
 
         private void OnDestroy()
