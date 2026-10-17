@@ -10,13 +10,11 @@ using UnityEngine.SceneManagement;
 
 namespace SoRLargerText
 {
-    // v2.4: retain the working v2.0 scene-load/event mechanism.
-    // Allow Unity UI Best Fit to increase its own maximum font size instead of
-    // changing only fontSize, which Best Fit can silently override.
-    // Diagnostic decisions are logged on text events, never in a polling loop.
+    // v2.5 production: preserve v2.4's confirmed-working zoom and fitting
+    // behavior. Remove all per-text diagnostic processing and logging.
     // Determine large-size tiers once at scene load (not periodically).
     // No startup settings migrations, overlay or repeated scans.
-    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.4.0")]
+    [BepInPlugin("mspeedo.sor.larger-text", "SoR Larger Text", "2.5.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         private static readonly BindingFlags Props =
@@ -30,9 +28,6 @@ namespace SoRLargerText
         private ConfigEntry<float> multiplier;
         private ConfigEntry<bool> protectLargeText;
         private ConfigEntry<bool> safeFit;
-        private ConfigEntry<bool> logDecisions;
-        private ConfigEntry<string> logFilter;
-        private int diagnosticLines;
         // Separate thresholds for each renderer: tk2d scale cannot be
         // meaningfully compared to a Unity UI fontSize.
         private readonly Dictionary<string, float> largeSizeCutoffs =
@@ -54,7 +49,6 @@ namespace SoRLargerText
             public bool HasBestFitMaximum;
             public int OriginalBestFitMaximum;
             public int AppliedBestFitMaximum;
-            public string LastDiagnostic;
         }
 
         private void Awake()
@@ -67,10 +61,6 @@ namespace SoRLargerText
                 "Keep the biggest text and obvious titles/headings at their original sizes.");
             safeFit = Config.Bind("General", "PreventTextClipping", true,
                 "Only prevent enlargement when Unity is configured to truncate text and the enlarged text would exceed its height. Best Fit and Overflow text can enlarge.");
-            logDecisions = Config.Bind("Diagnostics", "LogTextDecisions", true,
-                "Temporary diagnostics: log each text element's original size, fitting mode, and why it was enlarged or skipped. Disable after testing.");
-            logFilter = Config.Bind("Diagnostics", "TextFilter", "",
-                "Optional case-insensitive text/name filter for diagnostic output; blank logs all text up to the log limit.");
             // No settings migrations or writes. Existing Multiplier value is honored.
             harmony = new Harmony("mspeedo.sor.larger-text");
 
@@ -78,7 +68,7 @@ namespace SoRLargerText
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
             DiscoverRenderersAndHooks();
             StartCoroutine(ScanAfterSceneLoad());
-            Logger.LogInfo("Larger Text v2.4 loaded: zoom " + multiplier.Value.ToString("F2") +
+            Logger.LogInfo("Larger Text v2.5 loaded: zoom " + multiplier.Value.ToString("F2") +
                            "x; large-text protection " + protectLargeText.Value +
                            "; one scene scan, no periodic polling.");
         }
@@ -109,7 +99,6 @@ namespace SoRLargerText
                         if (type == null || !typeof(Component).IsAssignableFrom(type) ||
                             renderers.Contains(type)) continue;
                         renderers.Add(type);
-                        Logger.LogInfo("Larger Text renderer: " + type.FullName);
                         if (name == "UnityEngine.UI.Text") uiTextType = type;
                     }
                 }
@@ -144,7 +133,6 @@ namespace SoRLargerText
                 }
                 catch (Exception ex) { Logger.LogWarning("OnEnable hook: " + ex.Message); }
             }
-            Logger.LogInfo("Larger Text UI lifecycle hooks: " + count);
         }
 
         private int TryPatchSetter(Type type, string property)
@@ -184,7 +172,6 @@ namespace SoRLargerText
             foreach (int id in destroyed)
                 known.Remove(id);
             largeSizeCutoffs.Clear();
-            diagnosticLines = 0;
             StartCoroutine(ScanAfterSceneLoad());
         }
 
@@ -240,14 +227,11 @@ namespace SoRLargerText
                     if (median > 0 && maximum >= median * 1.35f)
                     {
                         largeSizeCutoffs[pair.Key] = (median + maximum) / 2f;
-                        Logger.LogInfo("Large-text tier " + pair.Key + " >= " +
-                            largeSizeCutoffs[pair.Key].ToString("F2"));
                     }
                 }
             }
             foreach (Component c in candidates)
                 if (Adjust(c)) modified++;
-            Logger.LogInfo("Larger Text scene scan: seen=" + found + " enlarged=" + modified);
         }
 
         private bool Adjust(Component component)
@@ -296,9 +280,8 @@ namespace SoRLargerText
                 }
                 catch { known.Remove(id); return false; }
             }
-            string protectionReason = LargeTextReason(component);
-            float zoom = protectionReason == null ? Mathf.Clamp(multiplier.Value, 1f, 3f) : 1f;
-            string reason = protectionReason ?? "enlarged";
+            float zoom = IsLargeText(component) ? 1f :
+                Mathf.Clamp(multiplier.Value, 1f, 3f);
             try
             {
                 if (tk2d)
@@ -309,15 +292,11 @@ namespace SoRLargerText
                     Vector3 original = entry.OriginalScale;
                     Vector3 wanted = new Vector3(original.x * zoom, original.y * zoom, original.z);
                     if ((current - wanted).sqrMagnitude < 0.000001f)
-                    {
-                        LogDecision(component, entry, reason, zoom, "tk2d", 0f, 0f);
                         return false;
-                    }
                     internalWrite = true;
                     try { property.SetValue(component, wanted, null); }
                     finally { internalWrite = false; }
                     entry.AppliedScale = wanted;
-                    LogDecision(component, entry, reason, zoom, "tk2d", 0f, 0f);
                     return true;
                 }
                 if (property.PropertyType != typeof(int) && property.PropertyType != typeof(float))
@@ -376,12 +355,10 @@ namespace SoRLargerText
                                     finally { internalWrite = false; }
                                 }
                                 entry.AppliedBestFitMaximum = desiredMax;
-                                reason = protectionReason ?? "bestfit-max-adjusted";
                             }
                             catch (Exception ex)
                             {
                                 Logger.LogDebug("Best Fit maximum: " + ex.Message);
-                                reason = "bestfit-max-failed";
                             }
                         }
                     }
@@ -424,17 +401,11 @@ namespace SoRLargerText
                         try { property.SetValue(component, fitting, null); }
                         finally { internalWrite = false; }
                         wantedFont = fitting;
-                        reason = fitting > lower ? "partially-fitted" : "new-truncation";
                         changed = fitting > lower;
-                    }
-                    else if (reason == "enlarged" && entry.HasBestFit && entry.OriginalBestFit)
-                    {
-                        reason = "bestfit";
                     }
                 }
 
                 entry.AppliedFont = wantedFont;
-                LogDecision(component, entry, reason, zoom, "font", rectHeight, preferredHeight);
                 return changed;
             }
             catch (Exception ex)
@@ -555,10 +526,11 @@ namespace SoRLargerText
             catch { return false; }
         }
 
-        // null means eligible; otherwise a specific, diagnosable reason.
-        private string LargeTextReason(Component component)
+        // Reuse the original visual-size cutoffs from the scene-load scan.
+        // Avoid constructing diagnostic reason strings on every text update.
+        private bool IsLargeText(Component component)
         {
-            if (!protectLargeText.Value) return null;
+            if (!protectLargeText.Value) return false;
             Transform t = component.transform;
             for (int i = 0; i < 3 && t != null; i++, t = t.parent)
             {
@@ -567,54 +539,13 @@ namespace SoRLargerText
                     n.Contains("heading") || n.Contains("logo") ||
                     n.Contains("bigtext") || n.Contains("largetext") ||
                     n.Contains("banner"))
-                    return "protected-name:" + n;
+                    return true;
             }
             float cutoff;
             float size;
-            if (largeSizeCutoffs.TryGetValue(RendererKey(component), out cutoff) &&
-                TryGetOriginalVisualSize(component, out size) && size >= cutoff)
-                return "protected-large-tier:" + cutoff.ToString("F2");
-            return null;
-        }
-
-        private void LogDecision(Component c, Entry e, string reason,
-            float factor, string renderer, float rectHeight, float preferred)
-        {
-            if (!logDecisions.Value || diagnosticLines >= 1500) return;
-            string preview = "";
-            if (!e.Tk2d)
-            {
-                try
-                {
-                    PropertyInfo p = c.GetType().GetProperty("text", Props);
-                    preview = p == null ? "" : p.GetValue(c, null) as string ?? "";
-                }
-                catch { }
-            }
-            string filter = logFilter.Value;
-            if (!string.IsNullOrEmpty(filter) &&
-                c.name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0 &&
-                preview.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
-                return;
-            preview = preview.Replace('\n', ' ').Replace('\r', ' ');
-            if (preview.Length > 90) preview = preview.Substring(0, 90) + "...";
-            bool fit = e.HasBestFit && e.OriginalBestFit;
-            string signature = preview + "|" + reason + "|" + e.AppliedFont +
-                "|" + e.AppliedBestFitMaximum + "|" + rectHeight.ToString("F1");
-            if (signature == e.LastDiagnostic) return;
-            e.LastDiagnostic = signature;
-            diagnosticLines++;
-
-            Logger.LogInfo("[LT-DIAG] id=" + c.GetInstanceID() +
-                " name='" + c.gameObject.name + "' renderer=" + renderer +
-                " reason=" + reason + " multiplier=" + factor.ToString("F2") +
-                " original=" + e.OriginalFont.ToString("F1") +
-                " applied=" + e.AppliedFont.ToString("F1") +
-                " bestFit=" + fit + " bestFitMaxOriginal=" + e.OriginalBestFitMaximum +
-                " bestFitMaxApplied=" + e.AppliedBestFitMaximum +
-                " rectHeight=" + rectHeight.ToString("F1") +
-                " preferredHeight=" + preferred.ToString("F1") +
-                " text='" + preview + "'");
+            return largeSizeCutoffs.TryGetValue(RendererKey(component), out cutoff) &&
+                   TryGetOriginalVisualSize(component, out size) &&
+                   size >= cutoff;
         }
 
         private void OnDestroy()
