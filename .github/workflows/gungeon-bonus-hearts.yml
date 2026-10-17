@@ -1,0 +1,46 @@
+name: Build Enter the Gungeon Bonus Enemy Hearts
+on:
+  push:
+    paths:
+      - 'enter-the-gungeon/BonusEnemyHearts/**'
+      - '.github/workflows/gungeon-bonus-hearts.yml'
+  pull_request:
+    paths:
+      - 'enter-the-gungeon/BonusEnemyHearts/**'
+      - '.github/workflows/gungeon-bonus-hearts.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: enter-the-gungeon/BonusEnemyHearts
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C# compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-devel mono-utils
+      - name: Compile
+        run: |
+          test -f /usr/lib/mono/2.0-api/mscorlib.dll
+          bash ./build.sh
+          monodis --assemblyref build/out/BonusEnemyHearts.dll
+      - name: Verify console command routing
+        run: |
+          mcs -sdk:2 -out:build/HeartDropCommandSmokeTest.exe -r:build/out/BonusEnemyHearts.dll -r:build/stubs/ModTheGungeonAPI.dll -r:build/stubs/BepInEx.dll -r:build/stubs/Assembly-CSharp.dll -r:build/stubs/UnityEngine.CoreModule.dll HeartDropCommandSmokeTest.cs
+          MONO_PATH=build/stubs:build/out mono build/HeartDropCommandSmokeTest.exe
+      - name: Verify Harmony death hook and 100 percent heart spawn
+        run: |
+          mcs -sdk:2 -out:build/HeartDropFunctionalTest.exe -r:build/out/BonusEnemyHearts.dll -r:build/stubs/ModTheGungeonAPI.dll -r:build/stubs/BepInEx.dll -r:build/stubs/Assembly-CSharp.dll -r:build/stubs/UnityEngine.CoreModule.dll -r:build/stubs/0Harmony.dll HeartDropFunctionalTest.cs
+          MONO_PATH=build/stubs:build/out mono build/HeartDropFunctionalTest.exe
+      - name: Package
+        run: |
+          mkdir -p deliver/BonusEnemyHearts
+          cp build/out/BonusEnemyHearts.dll deliver/BonusEnemyHearts/
+          cp README.md deliver/BonusEnemyHearts/README.md
+          cd deliver && zip -r ../BonusEnemyHearts-BepInEx.zip BonusEnemyHearts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BonusEnemyHearts-BepInEx
+          path: enter-the-gungeon/BonusEnemyHearts/BonusEnemyHearts-BepInEx.zip
