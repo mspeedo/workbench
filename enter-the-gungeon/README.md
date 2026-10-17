@@ -8,6 +8,6 @@ This directory groups Enter the Gungeon mods, with each mod kept in its own subd
 
 ## Build
 
-Use the [Bonus Enemy Hearts GitHub Actions workflow](../.github/workflows/gungeon-bonus-hearts.yml) to compile, test, and package `BonusEnemyHearts.dll` as a downloadable artifact.
+Use the [Enter the Gungeon GitHub Actions workflow](../.github/workflows/gungeon-build.yml) to compile, test, and package `BonusEnemyHearts.dll` as a downloadable artifact.
 
-New mods can be added as sibling directories with independent sources and build workflows.
+The game-level workflow responds to changes anywhere in `enter-the-gungeon/`. Additional mods can be added as sibling directories with their own build jobs under the same workflow.

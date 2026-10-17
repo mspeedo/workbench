@@ -1,18 +1,20 @@
-name: Build Enter the Gungeon Bonus Enemy Hearts
+name: Build Enter the Gungeon mods
 on:
   push:
     paths:
-      - 'enter-the-gungeon/BonusEnemyHearts/**'
-      - '.github/workflows/gungeon-bonus-hearts.yml'
+      - 'enter-the-gungeon/**'
+      - '.github/workflows/gungeon-build.yml'
   pull_request:
     paths:
-      - 'enter-the-gungeon/BonusEnemyHearts/**'
-      - '.github/workflows/gungeon-bonus-hearts.yml'
+      - 'enter-the-gungeon/**'
+      - '.github/workflows/gungeon-build.yml'
   workflow_dispatch:
 permissions:
   contents: read
+
 jobs:
-  build:
+  bonus-enemy-hearts:
+    name: Bonus Enemy Hearts
     runs-on: ubuntu-latest
     defaults:
       run:
