@@ -112,11 +112,10 @@ namespace SoRLargerText
         private void InstallTextHooks()
         {
             hooksInstalled = true;
-            int count = 0;
             // Hook the two common UI text updates. When a prefab spawns after
             // the one-time scan, changing its text usually invokes set_text.
-            count += TryPatchSetter(uiTextType, "text");
-            count += TryPatchSetter(uiTextType, "fontSize");
+            TryPatchSetter(uiTextType, "text");
+            TryPatchSetter(uiTextType, "fontSize");
 
             // Graphic.OnEnable is inherited. It receives all UI Graphics,
             // so the callback cheaply rejects anything that is not UI Text.
@@ -129,8 +128,7 @@ namespace SoRLargerText
                 {
                     harmony.Patch(enable, postfix:
                         new HarmonyMethod(typeof(Plugin).GetMethod("OnTextEvent", BindingFlags.NonPublic | BindingFlags.Static)));
-                    count++;
-                }
+                 }
                 catch (Exception ex) { Logger.LogWarning("OnEnable hook: " + ex.Message); }
             }
         }
@@ -182,7 +180,6 @@ namespace SoRLargerText
             yield return null;
             yield return null;
             DiscoverRenderersAndHooks();
-            int found = 0, modified = 0;
             // Gather first and classify original sizes BEFORE changing them.
             // This adds one sort per scene, never a recurring gameplay pass.
             var candidates = new List<Component>();
@@ -197,7 +194,6 @@ namespace SoRLargerText
                     Component c = item as Component;
                     if (c == null || c.gameObject == null || !c.gameObject.scene.IsValid())
                         continue;
-                    found++;
                     candidates.Add(c);
                     float originalSize;
                     if (TryGetOriginalVisualSize(c, out originalSize))
@@ -231,7 +227,7 @@ namespace SoRLargerText
                 }
             }
             foreach (Component c in candidates)
-                if (Adjust(c)) modified++;
+                Adjust(c);
         }
 
         private bool Adjust(Component component)
