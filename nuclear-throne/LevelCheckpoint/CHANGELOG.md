@@ -1,3 +1,19 @@
+# Changelog
+
+## v1.3.4 — Production (2026-10-19)
+
+- Promoted the v1.3.3 portal fallback after a successful **in-game Retry restoration at Palace 7-1** on NTT v100.034.
+- **No gameplay logic changed from v1.3.3 Beta**; only the version header, release notes and tests changed.
+- Kept v1.3.1 character initialization, native Retry-only behavior, first autosave at 1-2, schema-1 checkpoint compatibility and two rotating checkpoint files unchanged.
+- Other Palace and secret-area cases remain untested in-game and should be treated as potentially unsupported edge cases.
+
+## v1.3.3 — Beta: unusual-area Retry warp
+
+- Permit the already-existing native portal predecessor fallback for all supported stages, including Palace (7-x) and numeric secret areas (100–107), when `GameCont.can_advance_stage` is missing.
+- Preserve the post-transition area/subarea/loop verification, saved character reinitialization, and all checkpoint data unchanged.
+- Remove the now-unused unusual-area predicate.
+- **Not yet tested in NTT v100.034:** special-area transitions may still behave differently; a failed warp leaves the saved checkpoint intact.
+
 # Level Checkpoint — Changelog
 
 ## v1.3.2 — Production (2026-10-18)

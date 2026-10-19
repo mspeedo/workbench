@@ -1,4 +1,4 @@
-// Level Checkpoint for Nuclear Throne Together v100 — v1.3.2 (production; Retry character initialization fix)
+// Level Checkpoint for Nuclear Throne Together v100 — v1.3.4 (production; Palace 7-1 Retry verified)
 // Standalone, legacy NTGML global mod. No Session dependency.
 // Single-player built-in characters (including Cuz, Big Dog, Skeleton, Frog).
 // External custom race mods and co-op still unsupported.
@@ -209,11 +209,10 @@
             trace("[LCP] Invalid stage: " + lcp_stage(_s));
             exit;
         }
-        if (lcp_is_unusual_stage(_s.area, _s.subarea) && !variable_instance_exists(_g, "can_advance_stage")) {
-            global.lcp_phase = "blocked";
-            trace("[LCP] Secret/final-area warp requires can_advance_stage in this build; existing checkpoint preserved.");
-            exit;
-        }
+        // NTT v100.034 does not expose `can_advance_stage`. Its normal
+        // portal transition can still advance into Palace or secret stages
+        // from a staged predecessor (subarea - 1). Verify the result in
+        // the apply phase; never accept or overwrite a mismatched checkpoint.
         if (!lcp_require_fields(_g, "GameCont", ["area", "subarea", "loops", "hard", "crown", "lastarea", "lastsubarea", "levseed"])) {
             global.lcp_phase = "blocked";
             trace("[LCP] Warp blocked: required game-state fields missing.");
@@ -455,14 +454,11 @@
 
 #define lcp_supported_stage(_area, _subarea)
     // Regular areas + U100 secret areas; only simple scalar numeric stages.
-    // Actual warp to unusual areas additionally requires GameCont's native
-    // can_advance_stage flag (checked below before mutating live state).
+    // Secret and Palace transitions are attempted through the native portal;
+    // the apply phase always validates the resulting target stage.
     return is_real(_area) && is_real(_subarea)
         && ((_area >= 1 && _area <= 7) || (_area >= 100 && _area <= 107))
         && _subarea >= 1 && _subarea <= 5;
-
-#define lcp_is_unusual_stage(_area, _subarea)
-    return _area >= 100 || _area == 7 || (_area == 6 && _subarea >= 4);
 
 // Allowlisted primitive per-character and persistent per-run attributes.
 // Missing fields are ignored: U100 builds expose slightly different names.
