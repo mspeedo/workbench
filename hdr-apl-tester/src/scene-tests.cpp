@@ -34,7 +34,10 @@ int main() {
     assert(std::abs(gaming_fraction(0.0500001)-gaming_fraction(0.0499999))<0.001);
     for(int mode=0;mode<3;++mode) {
         for(int i=0;i<2000;++i) {
-            double t=i*0.01;
+            // Offset samples from exact scene-cut boundaries: adding one
+            // loop can round the floating-point timestamp to either side
+            // of an ideal instantaneous discontinuity.
+            double t=(i+0.25)*0.01;
             double a=sample_apl_pct(static_cast<Profile>(mode),t,20.0,3.0,35.0,false);
             double b=sample_apl_pct(static_cast<Profile>(mode),t+20.0,20.0,3.0,35.0,false);
             assert(a>=3.0-1e-8&&a<=35.0+1e-8);
