@@ -16,27 +16,38 @@ int main() {
     assert(std::abs(pq_encode_nits(100.0)-0.5080784215)<0.00001);
     assert(std::abs(pq_encode_nits(1000.0)-0.7518270962)<0.00001);
     assert(std::abs(gray_nits(10.0)-130.0)<0.000001);
-    // Hard cuts occur inside Gaming, without removing its normal continuous ramps.
-    // Sample just either side of the cuts to verify that these are actual
-    // one-frame brightness changes, not merely steeper interpolation.
-    struct Jump { double phase; double min_delta; };
-    constexpr Jump cuts[]={
-        {0.17,0.40},{0.215,0.40},{0.39,0.50},{0.435,0.40},
-        {0.60,0.55},{0.64,0.40},{0.83,0.50},{0.88,0.50}
+    // Four rapid game-like scene-change sequences, consisting of eight
+    // 200-ms ramps in a 20-second loop (not single-frame jumps).
+    struct Ramp { double begin; double end; double minimum_change; };
+    constexpr Ramp ramps[]={
+        {0.17,0.18,0.35},{0.215,0.225,0.30},
+        {0.39,0.40,0.45},{0.435,0.445,0.35},
+        {0.60,0.61,0.50},{0.64,0.65,0.30},
+        {0.83,0.84,0.45},{0.88,0.89,0.45}
     };
-    for(const auto& cut:cuts) {
-        double before=gaming_fraction(cut.phase-0.0000001);
-        double after=gaming_fraction(cut.phase+0.0000001);
-        assert(std::abs(after-before)>=cut.min_delta);
+    for(const auto& ramp:ramps) {
+        double start=gaming_fraction(ramp.begin);
+        double middle=gaming_fraction(0.5*(ramp.begin+ramp.end));
+        double finish=gaming_fraction(ramp.end);
+        assert(std::abs(finish-start)>=ramp.minimum_change);
+        // The middle must actually be part-way through the slope.
+        double lower=std::min(start,finish);
+        double upper=std::max(start,finish);
+        assert(middle>lower+0.08 && middle<upper-0.08);
+        assert(std::abs(middle-0.5*(start+finish))<0.12);
+        // Both endpoints must be continuous: no one-frame brightness jumps.
+        for(double boundary:{ramp.begin,ramp.end}) {
+            double before=gaming_fraction(boundary-1e-7);
+            double after=gaming_fraction(boundary+1e-7);
+            assert(std::abs(after-before)<0.001);
+        }
     }
     assert(std::abs(gaming_fraction(0.0)-gaming_fraction(1.0))<1e-10);
-    // Other portions of the gaming timeline still have smooth transitions.
     assert(std::abs(gaming_fraction(0.0500001)-gaming_fraction(0.0499999))<0.001);
     for(int mode=0;mode<3;++mode) {
         for(int i=0;i<2000;++i) {
-            // Offset samples from exact scene-cut boundaries: adding one
-            // loop can round the floating-point timestamp to either side
-            // of an ideal instantaneous discontinuity.
+            // Sample away from exact knot times to avoid unnecessary
+            // floating-point boundary ambiguity.
             double t=(i+0.25)*0.01;
             double a=sample_apl_pct(static_cast<Profile>(mode),t,20.0,3.0,35.0,false);
             double b=sample_apl_pct(static_cast<Profile>(mode),t+20.0,20.0,3.0,35.0,false);
