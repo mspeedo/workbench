@@ -158,7 +158,7 @@ static void make_panel() {
     widget(L"STATIC",L"Profile",0,16,51,105,23);
     selector=widget(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL,130,45,320,200,PROFILE);
     for(const wchar_t* name:{
-        L"Gaming loop (ramps and fluctuations)",L"Step response (sharp transitions)",
+        L"Gaming (ramps, hard cuts, fluctuations)",L"Step response (sharp transitions)",
         L"Smooth cosine wave",L"Manual low/high step"})
         SendMessageW(selector,CB_ADDSTRING,0,(LPARAM)name);
     SendMessageW(selector,CB_SETCURSEL,1,0);

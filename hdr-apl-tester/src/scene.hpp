@@ -20,17 +20,29 @@ inline double pq_encode_nits(double nits) {
     return std::pow((c1+c2*p)/(1.0+c3*p),m2);
 }
 inline double gaming_fraction(double phase) {
-    // Fixed, deterministic game-like APL envelope, independent of frame rate.
+    // Deterministic gaming-like camera movement with several true hard cuts.
+    // Duplicate timestamps encode instantaneous scene changes (not fast ramps):
+    // the first key is the value immediately before the cut; the second is
+    // the value immediately afterward. Short plateaus let the APL smoothing
+    // respond to dark/bright scenes before movement resumes.
+    // Profile duration stays 20 seconds; the curve is frame-rate independent.
     struct Key { double t,v; };
     constexpr Key points[]={
         {0.00,0.12},{0.05,0.25},{0.13,0.70},{0.17,0.65},
-        {0.22,0.14},{0.30,0.28},{0.35,0.90},{0.39,0.80},
-        {0.45,0.26},{0.52,0.47},{0.57,0.94},{0.64,0.18},
-        {0.73,0.43},{0.80,0.17},{0.85,0.92},{0.92,0.39},{1.00,0.12}
+        {0.17,0.11},{0.215,0.11},{0.215,0.57}, // dark cut / bright return
+        {0.22,0.56},{0.30,0.28},{0.35,0.90},{0.39,0.80},
+        {0.39,0.16},{0.435,0.16},{0.435,0.67}, // dark cut / bright return
+        {0.45,0.60},{0.52,0.47},{0.57,0.94},{0.60,0.81},
+        {0.60,0.13},{0.64,0.13},{0.64,0.60}, // dark cut / bright return
+        {0.73,0.43},{0.80,0.17},{0.83,0.30},
+        {0.83,0.91},{0.88,0.89},{0.88,0.27}, // bright flash / dark cut
+        {0.92,0.39},{1.00,0.12}
     };
     double v=points[0].v;
     for(unsigned i=1;i<sizeof(points)/sizeof(points[0]);++i) {
         if(phase<=points[i].t) {
+            // Repeated timestamps are skipped unless the first point matches;
+            // there is never a zero-length interpolation interval.
             double u=(phase-points[i-1].t)/(points[i].t-points[i-1].t);
             v=points[i-1].v+(points[i].v-points[i-1].v)*u;
             break;

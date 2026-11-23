@@ -16,6 +16,22 @@ int main() {
     assert(std::abs(pq_encode_nits(100.0)-0.5080784215)<0.00001);
     assert(std::abs(pq_encode_nits(1000.0)-0.7518270962)<0.00001);
     assert(std::abs(gray_nits(10.0)-130.0)<0.000001);
+    // Hard cuts occur inside Gaming, without removing its normal continuous ramps.
+    // Sample just either side of the cuts to verify that these are actual
+    // one-frame brightness changes, not merely steeper interpolation.
+    struct Jump { double phase; double min_delta; };
+    constexpr Jump cuts[]={
+        {0.17,0.40},{0.215,0.40},{0.39,0.50},{0.435,0.40},
+        {0.60,0.55},{0.64,0.40},{0.83,0.50},{0.88,0.50}
+    };
+    for(const auto& cut:cuts) {
+        double before=gaming_fraction(cut.phase-0.0000001);
+        double after=gaming_fraction(cut.phase+0.0000001);
+        assert(std::abs(after-before)>=cut.min_delta);
+    }
+    assert(std::abs(gaming_fraction(0.0)-gaming_fraction(1.0))<1e-10);
+    // Other portions of the gaming timeline still have smooth transitions.
+    assert(std::abs(gaming_fraction(0.0500001)-gaming_fraction(0.0499999))<0.001);
     for(int mode=0;mode<3;++mode) {
         for(int i=0;i<2000;++i) {
             double t=i*0.01;
