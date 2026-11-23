@@ -19,14 +19,14 @@ inline double pq_encode_nits(double nits) {
     double p=std::pow(std::max(0.0,std::min(10000.0,nits))/10000.0,m1);
     return std::pow((c1+c2*p)/(1.0+c3*p),m2);
 }
-// Square patch covering approximately one percent of the source frame.
+// Square patch covering approximately ten percent of the source frame.
 struct PatchLayout {
     unsigned x, y, side;
     double area_fraction;
 };
 inline PatchLayout center_patch(unsigned width, unsigned height) {
     if(width==0 || height==0) return {};
-    unsigned side=std::clamp(unsigned(std::lround(std::sqrt(double(width)*height*0.01))),
+    unsigned side=std::clamp(unsigned(std::lround(std::sqrt(double(width)*height*0.10))),
                              1u,std::min(width,height));
     return {(width-side)/2,(height-side)/2,side,double(side)*side/(double(width)*height)};
 }

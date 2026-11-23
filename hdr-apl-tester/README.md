@@ -25,7 +25,7 @@ Keyboard shortcuts while the gray scene has focus: F11 = fullscreen, Esc = windo
 
 Enable **Fixed center patch (P)** in any profile, or press **P** with the scene focused. The patch starts off. Its default source level is **100 nits**. Edit **Patch nits** (0–1300) and choose **Apply settings** to change it. Toggling the patch preserves the timeline, including while paused.
 
-The square stays centered and covers about 1% of the back buffer in windowed and fullscreen modes. ReShade processes it together with the animated background. Min and Max APL control the background, and **Source APL** reports the area-weighted mean including the patch. On the X36, try the default 1–15% Step response and watch the center after each cut for a flash or a delayed correction. The patch can also blend into a background of the same brightness.
+The square stays centered and covers about 10% of the back buffer (704 × 704 pixels at 3440 × 1440) in windowed and fullscreen modes. ReShade processes it together with the animated background. Min and Max APL control the background, and **Source APL** reports the area-weighted mean including the patch. On the X36, try the default 1–15% Step response and watch the center after each cut for a flash or a delayed correction. The patch can also blend into a background of the same brightness.
 
 ## HDR APL accuracy
 
