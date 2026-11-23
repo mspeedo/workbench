@@ -30,8 +30,15 @@ static ComPtr<ID3D11DeviceContext> context;
 static ComPtr<IDXGIFactory2> factory;
 static ComPtr<IDXGISwapChain3> swapchain;
 static ComPtr<ID3D11RenderTargetView> target;
-static apl::Profile mode=apl::Profile::Gaming;
-static double target_fps=60, low_apl=3, high_apl=35, loop_seconds=20, scene_seconds=0;
+static apl::Profile mode=apl::Profile::Steps;
+static double target_fps=60, low_apl=apl::default_min_apl, high_apl=apl::default_max_apl;
+static double loop_seconds=apl::default_loop_seconds(apl::Profile::Steps), scene_seconds=0;
+static double profile_loop_seconds[]={
+    apl::default_loop_seconds(apl::Profile::Gaming),
+    apl::default_loop_seconds(apl::Profile::Steps),
+    apl::default_loop_seconds(apl::Profile::Wave),
+    apl::default_loop_seconds(apl::Profile::Manual)
+};
 static double current_apl=0, actual_fps=0, next_frame=0, last_frame=0, stats_start=0;
 static unsigned stats_frames=0;
 static bool running=true, manual_high=false, fullscreen=false, hdr_ready=false;
@@ -89,6 +96,7 @@ static void apply() {
         return;
     }
     target_fps=f;low_apl=l;high_apl=h;loop_seconds=period;
+    profile_loop_seconds[static_cast<int>(mode)]=loop_seconds;
     next_frame=now_seconds();
 }
 static void pause_or_play() {
@@ -97,13 +105,17 @@ static void pause_or_play() {
 }
 static void select_mode(int n) {
     if(n<0||n>3) return;
+    profile_loop_seconds[static_cast<int>(mode)]=loop_seconds;
     mode=static_cast<apl::Profile>(n);
+    loop_seconds=profile_loop_seconds[n];
+    wchar_t loop_label[32]{};
+    swprintf_s(loop_label,L"%g",loop_seconds);
+    if(loop_box) SetWindowTextW(loop_box,loop_label);
     SendMessageW(selector,CB_SETCURSEL,n,0);
     scene_seconds=0;
 }
 static void toggle_manual() {
-    mode=apl::Profile::Manual;
-    SendMessageW(selector,CB_SETCURSEL,3,0);
+    select_mode(3);
     manual_high=!manual_high;
     SetWindowTextW(manual_button,manual_high?L"Manual: HIGH (T)":L"Manual: LOW (T)");
 }
@@ -149,15 +161,15 @@ static void make_panel() {
         L"Gaming loop (ramps and fluctuations)",L"Step response (sharp transitions)",
         L"Smooth cosine wave",L"Manual low/high step"})
         SendMessageW(selector,CB_ADDSTRING,0,(LPARAM)name);
-    SendMessageW(selector,CB_SETCURSEL,0,0);
+    SendMessageW(selector,CB_SETCURSEL,1,0);
     widget(L"STATIC",L"Target FPS",0,16,92,105,22);
     fps_box=widget(L"EDIT",L"60",ES_NUMBER|ES_AUTOHSCROLL,130,86,90,26,FPS,WS_EX_CLIENTEDGE);
     widget(L"STATIC",L"Min APL %",0,16,132,105,22);
-    low_box=widget(L"EDIT",L"3",ES_AUTOHSCROLL,130,126,90,26,LOW,WS_EX_CLIENTEDGE);
+    low_box=widget(L"EDIT",L"1",ES_AUTOHSCROLL,130,126,90,26,LOW,WS_EX_CLIENTEDGE);
     widget(L"STATIC",L"Max APL %",0,250,132,100,22);
-    high_box=widget(L"EDIT",L"35",ES_AUTOHSCROLL,352,126,98,26,HIGH,WS_EX_CLIENTEDGE);
+    high_box=widget(L"EDIT",L"15",ES_AUTOHSCROLL,352,126,98,26,HIGH,WS_EX_CLIENTEDGE);
     widget(L"STATIC",L"Loop seconds",0,16,172,105,22);
-    loop_box=widget(L"EDIT",L"20",ES_AUTOHSCROLL,130,166,90,26,LOOP,WS_EX_CLIENTEDGE);
+    loop_box=widget(L"EDIT",L"5",ES_AUTOHSCROLL,130,166,90,26,LOOP,WS_EX_CLIENTEDGE);
     widget(L"BUTTON",L"Apply settings",BS_PUSHBUTTON,250,166,200,29,APPLY);
     pause_button=widget(L"BUTTON",L"Pause (Space)",BS_PUSHBUTTON,16,211,210,33,PAUSE);
     widget(L"BUTTON",L"Restart (R)",BS_PUSHBUTTON,240,211,210,33,RESTART);

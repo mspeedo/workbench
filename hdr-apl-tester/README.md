@@ -12,12 +12,12 @@ Native Windows x64 Direct3D 11 HDR10 gray-scene application for ReShade APL smoo
 
 ## Modes and controls
 
-- Gaming loop (default): deterministic 20-second scene with quick fluctuations and larger rises/falls, like a moving game camera. All FPS rates sample the **same time-based timeline**.
-- Step response: clean high and low plateaus for evaluating exponential rise and half-cosine fall.
-- Smooth cosine wave: periodic moving APL with no discontinuities.
+- Step response (**startup default**, 5-second loop): clean high and low plateaus for evaluating exponential rise and half-cosine fall.
+- Smooth cosine wave (**5-second loop**): periodic moving APL with no discontinuities.
+- Gaming loop (**20-second loop**): deterministic scene with quick fluctuations and larger rises/falls, like a moving game camera. All FPS rates sample the **same time-based timeline**.
 - Manual: toggle a single low/high step with T or the panel button.
 
-Defaults: 60 target FPS, 3% to 35% input APL, 20-second loop. FPS can be 1 to 360; use 30/60/90/120/144/180/240 for comparisons. **Actual FPS** reports the achieved Present rate (which may be lower due to DWM, GPU driver, compositor or VSync).
+On startup: **Step response, 60 target FPS, 1% to 15% input APL, 5-second loop**. Switching profiles selects its own default period (Gaming 20 seconds; Steps and Wave 5 seconds), and custom loop durations set with Apply are retained per profile until exit. FPS can be 1 to 360; use 30/60/90/120/144/180/240 for comparisons. **Actual FPS** reports the achieved Present rate (which may be lower due to DWM, GPU driver, compositor or VSync).
 
 Keyboard shortcuts while the gray scene has focus: F11 = fullscreen, Esc = windowed, Space = pause/resume timeline, R = restart, T = manual step, 1-4 = select mode. The panel buttons work with the control panel focused.
 
@@ -25,7 +25,7 @@ Keyboard shortcuts while the gray scene has focus: F11 = fullscreen, Esc = windo
 
 True 10-bit DXGI flip-discard swapchain: DXGI_FORMAT_R10G10B10A2_UNORM in color space DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020. All screen pixels are equal-channel Rec.2020 gray values encoded using SMPTE ST 2084. No SDR approximation and no text/overlay in the test framebuffer.
 
-For the shader's default 1300-nit reference: signal nits = chosen input APL% * 13. Thus 3% = 39 nits; 10% = 130 nits; 35% = 455 nits. These are source-signal values, not a claim about physically measured panel luminance. Higher full-screen APL may be uncomfortably bright; begin with defaults.
+For the shader's default 1300-nit reference: signal nits = chosen input APL% * 13. Thus 1% = 13 nits; 10% = 130 nits; 15% = 195 nits. These are source-signal values, not a claim about physically measured panel luminance. Higher full-screen APL may be uncomfortably bright; begin with defaults.
 
 Uses QueryPerformanceCounter for frame pacing and elapsed scene time, not frame counts. Attempts Present(0) and permits tearing where OS supports it. Some systems may still throttle actual Present rate: use panel FPS reading to confirm before comparison.
 
@@ -35,6 +35,6 @@ Uses QueryPerformanceCounter for frame pacing and elapsed scene time, not frame 
 
 Using VS2022 Developer Command Prompt with Windows SDK:
 
-    cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /MD /Fe:APLHDRSceneTester.exe src\main.cpp /link d3d11.lib dxgi.lib comctl32.lib winmm.lib user32.lib gdi32.lib
+    cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /MT /Fe:APLHDRSceneTester.exe src\main.cpp /link d3d11.lib dxgi.lib comctl32.lib winmm.lib user32.lib gdi32.lib
 
 Automated CI builds the EXE, runs deterministic PQ/profile tests, and publishes the artifact. The shader repository is not modified.

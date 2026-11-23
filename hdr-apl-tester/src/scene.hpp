@@ -5,6 +5,12 @@ namespace aplscene {
 constexpr double reference_white_nits = 1300.0;
 constexpr double pi = 3.1415926535897932384626433832795;
 enum class Profile { Gaming = 0, Steps = 1, Wave = 2, Manual = 3 };
+constexpr double default_min_apl = 1.0;
+constexpr double default_max_apl = 15.0;
+// Profile defaults only: user-entered loop lengths are remembered per profile.
+inline constexpr double default_loop_seconds(Profile profile) {
+    return profile == Profile::Gaming ? 20.0 : 5.0;
+}
 inline double clamp01(double x) { return std::max(0.0, std::min(1.0, x)); }
 inline double pq_encode_nits(double nits) {
     // SMPTE ST 2084 / HDR10; normalize to 10,000 nits.
