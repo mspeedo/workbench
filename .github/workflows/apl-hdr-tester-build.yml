@@ -27,7 +27,7 @@ jobs:
         shell: cmd
         run: |
           if not exist dist mkdir dist
-          cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /MD /Fe:dist\APLHDRSceneTester.exe hdr-apl-tester\src\main.cpp /link d3d11.lib dxgi.lib comctl32.lib winmm.lib user32.lib gdi32.lib
+          cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /MT /Fe:dist\APLHDRSceneTester.exe hdr-apl-tester\src\main.cpp /link d3d11.lib dxgi.lib comctl32.lib winmm.lib user32.lib gdi32.lib
           copy hdr-apl-tester\README.md dist\README.md
       - uses: actions/upload-artifact@v4
         with:
