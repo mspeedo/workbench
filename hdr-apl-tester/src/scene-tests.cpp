@@ -12,6 +12,13 @@ int main() {
     static_assert(default_loop_seconds(Profile::Gaming) == 20.0, "Gaming loop: 20 seconds");
     assert(sample_apl_pct(Profile::Steps,0.6,5.0,1.0,15.0,false)==15.0);
     assert(sample_apl_pct(Profile::Steps,2.0,5.0,1.0,15.0,false)==1.0);
+    auto patch=center_patch(3440,1440);
+    assert(patch.side==223 && patch.x==1608 && patch.y==608);
+    assert(std::abs(patch.area_fraction-0.01)<0.0001);
+    assert(center_patch(1,300).side==1 && center_patch(0,0).side==0);
+    assert(frame_apl_pct(1,100,0)==1);
+    assert(std::abs(frame_apl_pct(1,100,0.01)-1.0669230769)<1e-9);
+    assert(frame_apl_pct(10,130,patch.area_fraction)==10);
     // SMPTE ST 2084 standard input code values.
     assert(std::abs(pq_encode_nits(100.0)-0.5080784215)<0.00001);
     assert(std::abs(pq_encode_nits(1000.0)-0.7518270962)<0.00001);

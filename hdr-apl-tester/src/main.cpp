@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cwchar>
 #include <string>
+#include <vector>
 #include "scene.hpp"
 
 #pragma comment(lib, "d3d11.lib")
@@ -21,10 +22,15 @@
 
 using Microsoft::WRL::ComPtr;
 namespace apl=aplscene;
-enum Id {PROFILE=101,FPS,LOW,HIGH,LOOP,APPLY,PAUSE,RESTART,TOGGLE,FULLSCREEN,HELP,STATUS};
+enum Id {PROFILE=101,FPS,LOW,HIGH,LOOP,APPLY,PAUSE,RESTART,TOGGLE,FULLSCREEN,HELP,STATUS,PATCH,PATCH_NITS};
 static HWND panel=nullptr, scene_window=nullptr, selector=nullptr, fps_box=nullptr;
 static HWND low_box=nullptr, high_box=nullptr, loop_box=nullptr, status_text=nullptr;
 static HWND pause_button=nullptr, manual_button=nullptr;
+static HWND patch_check=nullptr, patch_box=nullptr;
+static bool patch_enabled=false;
+static double patch_nits=100.0;
+static apl::PatchLayout patch_layout{};
+static ComPtr<ID3D11Texture2D> back_buffer, patch_texture;
 static ComPtr<ID3D11Device> device;
 static ComPtr<ID3D11DeviceContext> context;
 static ComPtr<IDXGIFactory2> factory;
@@ -81,12 +87,12 @@ static void help() {
        L"The gray scene is a separate D3D11 HDR10 PQ swapchain;\n"
        L"the control panel is never drawn into its ReShade input.\n\n"
        L"F11 fullscreen | Esc windowed | Space pause/play | R restart\n"
-       L"T toggle manual step | 1-4 select profile\n\n"
+       L"T toggle manual step | P toggle fixed center patch | 1-4 select profile\n\n"
        L"Actual FPS shows achieved Present throughput; drivers can impose limits.",
        L"ReShade HDR APL setup", MB_OK|MB_ICONINFORMATION);
 }
 static void apply() {
-    double f,l,h,period;
+    double f,l,h,period,nits;
     if(!get_value(fps_box,f)||!get_value(low_box,l)||!get_value(high_box,h)||
        !get_value(loop_box,period)||f<1||f>360||l<0||h>100||l>=h||
        period<2||period>120) {
@@ -95,6 +101,13 @@ static void apply() {
            L"Invalid values",MB_OK|MB_ICONWARNING);
         return;
     }
+    if(!get_value(patch_box,nits)||nits<0||nits>apl::reference_white_nits) {
+        MessageBoxW(panel,L"Patch brightness must be between 0 and 1300 nits.",
+                    L"Invalid patch brightness",MB_OK|MB_ICONWARNING);
+        return;
+    }
+    if(nits!=patch_nits) patch_texture.Reset();
+    patch_nits=nits;
     target_fps=f;low_apl=l;high_apl=h;loop_seconds=period;
     profile_loop_seconds[static_cast<int>(mode)]=loop_seconds;
     next_frame=now_seconds();
@@ -142,12 +155,14 @@ static void change_fullscreen(bool enable) {
 static void update_status() {
     if(!status_text) return;
     wchar_t b[480]{};
+    double frame_apl=apl::frame_apl_pct(current_apl,patch_nits,
+                                        patch_enabled?patch_layout.area_fraction:0.0);
     swprintf_s(b,L"HDR10: %s       Target: %.1f FPS       Actual: %.1f FPS\r\n"
-         L"Source APL: %.2f%%       Full-frame gray: %.1f nits\r\n"
+         L"Source APL: %.2f%%       Background: %.1f nits\r\n"
          L"Scene time: %.2f / %.1f s       %s\r\n"
          L"D3D11 | R10G10B10A2 | ST2084 PQ / Rec.2020",
          hdr_ready?L"ACTIVE":L"UNAVAILABLE",target_fps,actual_fps,
-         current_apl,apl::gray_nits(current_apl),
+         frame_apl,apl::gray_nits(current_apl),
          std::fmod(scene_seconds,loop_seconds),loop_seconds,
          running?L"running":L"paused");
     SetWindowTextW(status_text,b);
@@ -175,19 +190,27 @@ static void make_panel() {
     widget(L"BUTTON",L"Restart (R)",BS_PUSHBUTTON,240,211,210,33,RESTART);
     manual_button=widget(L"BUTTON",L"Manual: LOW (T)",BS_PUSHBUTTON,16,254,210,33,TOGGLE);
     widget(L"BUTTON",L"Fullscreen (F11)",BS_PUSHBUTTON,240,254,210,33,FULLSCREEN);
-    widget(L"BUTTON",L"ReShade setup and shortcuts",BS_PUSHBUTTON,16,302,434,30,HELP);
-    status_text=widget(L"STATIC",L"",SS_LEFT,16,350,458,95,STATUS);
+    patch_check=widget(L"BUTTON",L"Fixed center patch (P)",BS_AUTOCHECKBOX,16,299,208,28,PATCH);
+    widget(L"STATIC",L"Patch nits",0,250,305,90,22);
+    patch_box=widget(L"EDIT",L"100",ES_AUTOHSCROLL,352,299,98,26,PATCH_NITS,WS_EX_CLIENTEDGE);
+    widget(L"BUTTON",L"ReShade setup and shortcuts",BS_PUSHBUTTON,16,342,434,30,HELP);
+    status_text=widget(L"STATIC",L"",SS_LEFT,16,387,458,95,STATUS);
     widget(L"STATIC",L"Move the gray window to the HDR monitor; press F11 there.\n"
           L"Control panel is not part of the frame sampled by ReShade.",
-          SS_LEFT,16,451,458,48);
+          SS_LEFT,16,485,458,48);
     SetTimer(panel,1,250,nullptr);
     update_status();
 }
 static HRESULT make_target() {
     target.Reset();
-    ComPtr<ID3D11Texture2D> surface;
-    HRESULT hr=swapchain->GetBuffer(0,IID_PPV_ARGS(&surface));
-    return FAILED(hr)?hr:device->CreateRenderTargetView(surface.Get(),nullptr,&target);
+    HRESULT hr=swapchain->GetBuffer(0,IID_PPV_ARGS(&back_buffer));
+    if(FAILED(hr)) return hr;
+    D3D11_TEXTURE2D_DESC desc{};
+    back_buffer->GetDesc(&desc);
+    auto layout=apl::center_patch(desc.Width,desc.Height);
+    if(layout.side!=patch_layout.side) patch_texture.Reset();
+    patch_layout=layout;
+    return device->CreateRenderTargetView(back_buffer.Get(),nullptr,&target);
 }
 static void check_hdr() {
     if(!swapchain) return;
@@ -238,10 +261,30 @@ static void resize_swapchain() {
     if(rc.right<=0||rc.bottom<=0) return;
     context->OMSetRenderTargets(0,nullptr,nullptr);
     target.Reset();
+    back_buffer.Reset();
     HRESULT hr=swapchain->ResizeBuffers(0,(UINT)rc.right,(UINT)rc.bottom,
          DXGI_FORMAT_UNKNOWN,tearing?DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING:0);
     if(SUCCEEDED(hr)) {hr=make_target();check_hdr();}
     if(FAILED(hr)) hdr_ready=false;
+}
+static HRESULT make_patch_texture() {
+    // Cache a square in the same 10-bit PQ format as the swapchain.
+    const UINT side=patch_layout.side;
+    const UINT code=UINT(std::lround(apl::pq_encode_nits(patch_nits)*1023.0));
+    const UINT pixel=(3u<<30)|(code<<20)|(code<<10)|code;
+    std::vector<UINT> pixels(size_t(side)*side,pixel);
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width=desc.Height=side;
+    desc.MipLevels=desc.ArraySize=desc.SampleDesc.Count=1;
+    desc.Format=DXGI_FORMAT_R10G10B10A2_UNORM;
+    desc.Usage=D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA data{pixels.data(),UINT(side*sizeof(UINT)),0};
+    return device->CreateTexture2D(&desc,&data,&patch_texture);
+}
+static void set_patch(bool enabled) {
+    patch_enabled=enabled;
+    SendMessageW(patch_check,BM_SETCHECK,enabled?BST_CHECKED:BST_UNCHECKED,0);
 }
 static void render() {
     if(!swapchain||!target) return;
@@ -251,6 +294,16 @@ static void render() {
     const float rgba[4]={pq,pq,pq,1.0f};
     context->OMSetRenderTargets(1,target.GetAddressOf(),nullptr);
     context->ClearRenderTargetView(target.Get(),rgba);
+    if(patch_enabled) {
+        if(!patch_texture && FAILED(make_patch_texture())) {
+            set_patch(false);
+            MessageBoxW(panel,L"Could not create the HDR center patch.",L"Renderer error",MB_OK|MB_ICONERROR);
+        } else {
+            context->OMSetRenderTargets(0,nullptr,nullptr);
+            context->CopySubresourceRegion(back_buffer.Get(),0,patch_layout.x,patch_layout.y,0,
+                                           patch_texture.Get(),0,nullptr);
+        }
+    }
     HRESULT hr=swapchain->Present(0,tearing?DXGI_PRESENT_ALLOW_TEARING:0);
     if(SUCCEEDED(hr)) ++stats_frames;
     if(hr==DXGI_ERROR_DEVICE_REMOVED||hr==DXGI_ERROR_DEVICE_RESET) quit=true;
@@ -260,6 +313,7 @@ static void handle_key(WPARAM k) {
     else if(k==VK_ESCAPE) {if(fullscreen)change_fullscreen(false);}
     else if(k==VK_SPACE) pause_or_play();
     else if(k=='R') scene_seconds=0;
+    else if(k=='P') set_patch(!patch_enabled);
     else if(k=='T') toggle_manual();
     else if(k>='1'&&k<='4') select_mode(int(k-'1'));
 }
@@ -268,7 +322,9 @@ static LRESULT CALLBACK scene_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
         case WM_SIZE: if(wp!=SIZE_MINIMIZED)resize_swapchain();return 0;
         case WM_MOVE:
         case WM_DISPLAYCHANGE: check_hdr();return 0;
-        case WM_KEYDOWN: handle_key(wp);return 0;
+        case WM_KEYDOWN:
+            if(wp!='P' || !(lp&(1L<<30))) handle_key(wp);
+            return 0;
         case WM_CLOSE: DestroyWindow(hwnd);return 0;
         case WM_DESTROY: scene_window=nullptr;quit=true;PostQuitMessage(0);return 0;
     }
@@ -286,6 +342,7 @@ static LRESULT CALLBACK panel_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
                     case RESTART:scene_seconds=0;break;
                     case TOGGLE:toggle_manual();break;
                     case FULLSCREEN:change_fullscreen(!fullscreen);break;
+                    case PATCH:set_patch(SendMessageW(patch_check,BM_GETCHECK,0,0)==BST_CHECKED);break;
                     case HELP:help();break;
                 }
             }
@@ -319,7 +376,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     int x=r.left,y=r.top;
     panel=CreateWindowExW(0,L"APLHDRControl",L"APL HDR Scene Tester - Controls",
              WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,
-             x+20,y+45,486,545,nullptr,nullptr,instance,nullptr);
+             x+20,y+45,486,580,nullptr,nullptr,instance,nullptr);
     if(!panel) return 1;
     make_panel();
     int width=std::max(600L,std::min(1600L,r.right-r.left-530));

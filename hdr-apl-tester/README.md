@@ -21,6 +21,12 @@ On startup: **Step response, 60 target FPS, 1% to 15% input APL, 5-second loop**
 
 Keyboard shortcuts while the gray scene has focus: F11 = fullscreen, Esc = windowed, Space = pause/resume timeline, R = restart, T = manual step, 1-4 = select mode. The panel buttons work with the control panel focused.
 
+### Fixed center patch
+
+Enable **Fixed center patch (P)** in any profile, or press **P** with the scene focused. The patch starts off. Its default source level is **100 nits**. Edit **Patch nits** (0–1300) and choose **Apply settings** to change it. Toggling the patch preserves the timeline, including while paused.
+
+The square stays centered and covers about 1% of the back buffer in windowed and fullscreen modes. ReShade processes it together with the animated background. Min and Max APL control the background, and **Source APL** reports the area-weighted mean including the patch. On the X36, try the default 1–15% Step response and watch the center after each cut for a flash or a delayed correction. The patch can also blend into a background of the same brightness.
+
 ## HDR APL accuracy
 
 True 10-bit DXGI flip-discard swapchain: DXGI_FORMAT_R10G10B10A2_UNORM in color space DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020. All screen pixels are equal-channel Rec.2020 gray values encoded using SMPTE ST 2084. No SDR approximation and no text/overlay in the test framebuffer.
