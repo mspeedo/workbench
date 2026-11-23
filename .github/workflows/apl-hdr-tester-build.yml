@@ -1,0 +1,37 @@
+name: Build HDR APL Scene Tester (Windows)
+on:
+  push:
+    paths:
+      - 'hdr-apl-tester/**'
+      - '.github/workflows/apl-hdr-tester-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile and validate native Windows x64 HDR10
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Compile deterministic scene tests
+        shell: cmd
+        run: |
+          cl /nologo /std:c++17 /EHsc /O2 /W4 /Fe:scene-tests.exe hdr-apl-tester\src\scene-tests.cpp
+          scene-tests.exe
+      - name: Build app and stage distribution
+        shell: cmd
+        run: |
+          if not exist dist mkdir dist
+          cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /MD /Fe:dist\APLHDRSceneTester.exe hdr-apl-tester\src\main.cpp /link d3d11.lib dxgi.lib comctl32.lib winmm.lib user32.lib gdi32.lib
+          copy hdr-apl-tester\README.md dist\README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: APL-HDR-Scene-Tester-Windows
+          path: dist/
+          retention-days: 90
+          if-no-files-found: error
