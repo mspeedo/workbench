@@ -1,0 +1,488 @@
+Run: https://github.com/mspeedo/workbench/actions/runs/45469148858
+ca11334deeec7365a911af7da22ef70a0a0e0504
+433c876056c36f762428921a8b0a7760afe3911f
+7cf6fbdfbbd2bc561fbb299e15d532ef02b7512d
+433c8760 chore(deps): update dependency xorg/app/xauth to xauth-1.1.5 (#6174)
+d6a48b08 chore(deps): update dependency xorg/font/util to font-util-1.4.2 (#6175)
+a7be0738 chore(deps): update dependency xorg/lib/libfontenc to libfontenc-1.1.10 (#6176)
+857f10d4 chore(deps): update dependency xorg/lib/libxcvt to libxcvt-0.1.3 (#6177)
+eb07a6ea chore(deps): update dependency xorg/lib/libxfont to libxfont2-2.0.10 (#6178)
+7733512e chore(deps): update dependency libevdev/libevdev to libevdev-1.14.0 (#6173)
+e743b4fd chore(deps): update dependency xorg/lib/libxmu to libxmu-1.3.1 (#6179)
+df4c8664 chore(deps): update lizardbyte/actions action to v2026.1123.33249 (#6180)
+cae70da9 chore(deps): update dependency xorg/xserver to xorg-server-21.1.26 (#6172)
+9e8a2a54 chore(deps): update dependency nlohmann/json to v3.12.0 (#6169)
+5f7d08e8 feat(video): add support for legacy MPEG-2 and H.263+ encoders (#5194)
+6b54f99f chore(deps): update dependency miniupnp/miniupnp to miniupnpc_2_3_5 (#6168)
+745f95a7 chore(deps): update msys2/setup-msys2 action to v2.34.0 (#6167)
+82fe0f06 fix(build): backport Boost.Locale support for CMake 4.5 (#6166)
+ab6140eb chore(deps): update dependency libtirpc to libtirpc-1-3-8 (#6163)
+b45431e2 build(linux): install CUDA from NVIDIA component archives (#6157)
+cd425048 build(deps): migrate submodules to CPM (#6158)
+575456e0 build(linux): align CUDA packages on CUDA 13.5 (#6155)
+a0d3de9b chore(deps): annotate Flatpak module sources (#6154)
+fa80c6e2 chore(deps): update dependency vue-i18n to v11.4.23 (#6150)
+f5424a07 chore(deps): update astral-sh/setup-uv action to v10.4.0 (#6151)
+920f6270 build(deps): bump third-party/libvirtualhid from `2234c00` to `dd8153d` (#6149)
+6b176045 chore(deps): update dependency @intlify/message-compiler to v11.4.23 (#6143)
+de1e671e fix(linux/wlr): map absolute mouse input on rotated outputs (#6020)
+802a41c3 chore(deps): update dependency vue to v3.5.46 (#6144)
+7a7c6902 docs(deps): standardize the CPM lockfile heading (#6146)
+00a29943 docs: clarify KMS and wlroots output selection (#6138)
+4fe14218 chore(deps): update dependency @lucide/vue to v1.76.0 (#6135)
+aed346bf chore(deps): update dependency @intlify/message-compiler to v11.4.22 (#6129)
+23faefde chore(deps): update dependency @lucide/vue to v1.75.0 (#6132)
+7bd8b4c5 chore(deps): update dependency vue-i18n to v11.4.22 (#6130)
+5044e321 build(deps): bump third-party/tray from `c1f2a8a` to `c7b35bb` (#6131)
+37ee7d54 fix(packaging): inline single-use Homebrew formula helpers (#6128)
+5cd21f39 chore(deps): update dependency vue-i18n to v11.4.21 (#6127)
+63d6d052 chore(deps): update dependency @intlify/message-compiler to v11.4.21 (#6126)
+0875ca50 ci(freebsd): prevent Xvfb resets between capture probes (#6119)
+ .github/workflows/ci-cloudsmith.yml                |   2 +-
+ .github/workflows/ci-copr.yml                      |   2 +-
+ .github/workflows/ci-flatpak.yml                   |   6 +-
+ .github/workflows/ci-freebsd.yml                   |   5 +-
+ .github/workflows/ci-homebrew.yml                  |   2 +-
+ .github/workflows/ci-linux.yml                     |   6 +-
+ .github/workflows/ci-macos.yml                     |   2 +-
+ .github/workflows/ci-windows.yml                   |   4 +-
+ .github/workflows/ci.yml                           |   4 +-
+ .github/workflows/publish-artifacts.yml            |   2 +-
+ .gitmodules                                        |  51 --
+ CMakeLists.txt                                     |   7 +-
+ cmake/compile_definitions/common.cmake             |  23 +-
+ cmake/compile_definitions/linux.cmake              |  34 +-
+ cmake/compile_definitions/macos.cmake              |   4 +-
+ cmake/compile_definitions/windows.cmake            |  18 +-
+ cmake/dependencies/build_deps.cmake                |   4 +
+ cmake/dependencies/common.cmake                    |  29 +-
+ cmake/dependencies/ffmpeg.cmake                    |  50 +-
+ cmake/dependencies/glad.cmake                      |  10 +-
+ cmake/dependencies/macos.cmake                     |   3 +
+ cmake/dependencies/nv_codec_headers.cmake          |  16 +-
+ cmake/prep/options.cmake                           |   4 +-
+ cmake/targets/common.cmake                         |  11 +-
+ docs/building.md                                   |   3 +
+ docs/configuration.md                              |  91 +++-
+ docs/getting_started.md                            |  39 +-
+ package-lock.cmake                                 | 178 ++++++-
+ package-lock.json                                  | 188 +++----
+ package.json                                       |   8 +-
+ packaging/linux/copr/Sunshine.spec                 | 135 ++---
+ .../linux/flatpak/dev.lizardbyte.app.Sunshine.yml  |  21 +-
+ packaging/linux/flatpak/modules/avahi.json         |   7 +-
+ packaging/linux/flatpak/modules/boost.json         |  13 +-
+ packaging/linux/flatpak/modules/cuda.json          | 171 +++++--
+ packaging/linux/flatpak/modules/ffmpeg.json        |  10 +
+ packaging/linux/flatpak/modules/libevdev.json      |  10 +-
+ packaging/linux/flatpak/modules/miniupnpc.json     |   9 +-
+ packaging/linux/flatpak/modules/nlohmann_json.json |  14 +-
+ packaging/linux/flatpak/modules/numactl.json       |   5 +
+ packaging/linux/flatpak/modules/sunshine/glad.json |  14 +
+ .../flatpak/modules/sunshine/libdisplaydevice.json |  14 +
+ .../flatpak/modules/sunshine/libvirtualhid.json    |  15 +
+ .../modules/sunshine/moonlight-common-c.json       |  14 +
+ .../modules/sunshine/plasma-wayland-protocols.json |  14 +
+ .../modules/sunshine/simple-web-server.json        |  16 +
+ packaging/linux/flatpak/modules/sunshine/tray.json |  14 +
+ .../modules/sunshine/wayland-protocols.json        |  15 +
+ .../flatpak/modules/sunshine/wlr-protocols.json    |  16 +
+ packaging/linux/flatpak/modules/xvfb/xvfb.json     |  95 +++-
+ packaging/sunshine.rb                              | 447 ++++++++--------
+ patches/boost-locale-cmake-4.5.patch               |  11 +
+ pyproject.toml                                     |   6 +-
+ scripts/linux_build.sh                             | 183 +++++--
+ src/config.cpp                                     |   4 +
+ src/config.h                                       |   2 +
+ src/input.cpp                                      |  40 +-
+ src/input.h                                        |  11 +
+ src/nvhttp.cpp                                     |  11 +-
+ src/platform/common.h                              |   2 +
+ src/platform/linux/kms_display.h                   |  82 +++
+ src/platform/linux/kmsgrab.cpp                     | 438 ++++++----------
+ src/platform/linux/wayland.h                       |  38 +-
+ src/platform/linux/wlgrab.cpp                      |  29 +-
+ src/platform/macos/av_audio.h                      |   2 +-
+ src/rtsp.cpp                                       |  50 +-
+ src/rtsp.h                                         |   9 +
+ src/thread_safe.h                                  |  10 +-
+ src/video.cpp                                      | 560 ++++++++++++++++-----
+ src/video.h                                        |  94 +++-
+ src/video_capture_groups.h                         | 136 +++++
+ .../common/assets/web/configs/config_tabs.json     |   2 +
+ .../common/assets/web/configs/tabs/Advanced.vue    |  22 +
+ .../common/assets/web/public/assets/locale/en.json |  10 +
+ tests/CMakeLists.txt                               |  13 +-
+ .../unit/platform/linux/test_display_geometry.cpp  |  39 ++
+ tests/unit/platform/linux/test_wayland.cpp         |  10 +
+ tests/unit/test_input.cpp                          | 180 +++++++
+ tests/unit/test_legacy_codec_roundtrip.cpp         | 221 ++++++++
+ tests/unit/test_legacy_codec_selection.cpp         |  96 ++++
+ tests/unit/test_nvhttp_codec_flags.cpp             |  17 +-
+ tests/unit/test_rtsp.cpp                           |  98 ++++
+ tests/unit/test_system_tray.cpp                    |   4 +-
+ tests/unit/test_video.cpp                          |  64 ++-
+ tests/unit/test_video_capture_groups.cpp           | 184 +++++++
+ tests/web/Configuration.test.js                    |  21 +
+ third-party/Simple-Web-Server                      |   1 -
+ third-party/TPCircularBuffer                       |   1 -
+ third-party/ViGEmClient                            |   1 -
+ third-party/build-deps                             |   1 -
+ third-party/glad                                   |   1 -
+ third-party/libdisplaydevice                       |   1 -
+ third-party/libvirtualhid                          |   1 -
+ third-party/moonlight-common-c                     |   1 -
+ third-party/nvapi                                  |   1 -
+ third-party/plasma-wayland-protocols               |   1 -
+ third-party/tray                                   |   1 -
+ third-party/wayland-protocols                      |   1 -
+ third-party/wlr-protocols                          |   1 -
+ uv.lock                                            |  18 +-
+ vite.config.js                                     |   4 +-
+ 101 files changed, 3360 insertions(+), 1249 deletions(-)
+Auto-merging .github/workflows/ci-cloudsmith.yml
+CONFLICT (content): Merge conflict in .github/workflows/ci-cloudsmith.yml
+Auto-merging .github/workflows/ci-copr.yml
+CONFLICT (content): Merge conflict in .github/workflows/ci-copr.yml
+Auto-merging .github/workflows/ci-flatpak.yml
+CONFLICT (content): Merge conflict in .github/workflows/ci-flatpak.yml
+Auto-merging .github/workflows/ci-freebsd.yml
+Auto-merging .github/workflows/ci-homebrew.yml
+CONFLICT (content): Merge conflict in .github/workflows/ci-homebrew.yml
+Auto-merging .github/workflows/ci-linux.yml
+CONFLICT (content): Merge conflict in .github/workflows/ci-linux.yml
+Auto-merging .github/workflows/ci-macos.yml
+Auto-merging .github/workflows/ci-windows.yml
+Auto-merging .github/workflows/ci.yml
+CONFLICT (content): Merge conflict in .github/workflows/ci.yml
+Auto-merging .github/workflows/publish-artifacts.yml
+CONFLICT (content): Merge conflict in .github/workflows/publish-artifacts.yml
+Auto-merging .gitmodules
+CONFLICT (content): Merge conflict in .gitmodules
+Auto-merging docs/configuration.md
+Auto-merging src/config.h
+Auto-merging src/nvhttp.cpp
+Auto-merging src/platform/common.h
+Auto-merging src/video.cpp
+Auto-merging src/video.h
+Auto-merging tests/unit/test_video.cpp
+CONFLICT (modify/delete): third-party/moonlight-common-c deleted in upstream/master and modified in HEAD.  Version HEAD of third-party/moonlight-common-c left in tree.
+Automatic merge failed; fix conflicts and then commit the result.
+UU .github/workflows/ci-cloudsmith.yml
+UU .github/workflows/ci-copr.yml
+UU .github/workflows/ci-flatpak.yml
+M  .github/workflows/ci-freebsd.yml
+UU .github/workflows/ci-homebrew.yml
+UU .github/workflows/ci-linux.yml
+M  .github/workflows/ci-macos.yml
+M  .github/workflows/ci-windows.yml
+UU .github/workflows/ci.yml
+UU .github/workflows/publish-artifacts.yml
+UU .gitmodules
+M  CMakeLists.txt
+M  cmake/compile_definitions/common.cmake
+M  cmake/compile_definitions/linux.cmake
+M  cmake/compile_definitions/macos.cmake
+M  cmake/compile_definitions/windows.cmake
+A  cmake/dependencies/build_deps.cmake
+M  cmake/dependencies/common.cmake
+M  cmake/dependencies/ffmpeg.cmake
+M  cmake/dependencies/glad.cmake
+M  cmake/dependencies/macos.cmake
+M  cmake/dependencies/nv_codec_headers.cmake
+M  cmake/prep/options.cmake
+M  cmake/targets/common.cmake
+M  docs/building.md
+M  docs/configuration.md
+M  docs/getting_started.md
+M  package-lock.cmake
+M  package-lock.json
+M  package.json
+M  packaging/linux/copr/Sunshine.spec
+M  packaging/linux/flatpak/dev.lizardbyte.app.Sunshine.yml
+M  packaging/linux/flatpak/modules/avahi.json
+M  packaging/linux/flatpak/modules/boost.json
+M  packaging/linux/flatpak/modules/cuda.json
+M  packaging/linux/flatpak/modules/ffmpeg.json
+M  packaging/linux/flatpak/modules/libevdev.json
+M  packaging/linux/flatpak/modules/miniupnpc.json
+M  packaging/linux/flatpak/modules/nlohmann_json.json
+M  packaging/linux/flatpak/modules/numactl.json
+A  packaging/linux/flatpak/modules/sunshine/glad.json
+A  packaging/linux/flatpak/modules/sunshine/libdisplaydevice.json
+A  packaging/linux/flatpak/modules/sunshine/libvirtualhid.json
+A  packaging/linux/flatpak/modules/sunshine/moonlight-common-c.json
+A  packaging/linux/flatpak/modules/sunshine/plasma-wayland-protocols.json
+A  packaging/linux/flatpak/modules/sunshine/simple-web-server.json
+A  packaging/linux/flatpak/modules/sunshine/tray.json
+A  packaging/linux/flatpak/modules/sunshine/wayland-protocols.json
+A  packaging/linux/flatpak/modules/sunshine/wlr-protocols.json
+M  packaging/linux/flatpak/modules/xvfb/xvfb.json
+M  packaging/sunshine.rb
+A  patches/boost-locale-cmake-4.5.patch
+M  pyproject.toml
+M  scripts/linux_build.sh
+M  src/config.cpp
+M  src/config.h
+M  src/input.cpp
+M  src/input.h
+M  src/nvhttp.cpp
+M  src/platform/common.h
+A  src/platform/linux/kms_display.h
+M  src/platform/linux/kmsgrab.cpp
+M  src/platform/linux/wayland.h
+M  src/platform/linux/wlgrab.cpp
+M  src/platform/macos/av_audio.h
+M  src/rtsp.cpp
+M  src/rtsp.h
+M  src/thread_safe.h
+M  src/video.cpp
+M  src/video.h
+A  src/video_capture_groups.h
+M  src_assets/common/assets/web/configs/config_tabs.json
+M  src_assets/common/assets/web/configs/tabs/Advanced.vue
+M  src_assets/common/assets/web/public/assets/locale/en.json
+M  tests/CMakeLists.txt
+M  tests/unit/platform/linux/test_display_geometry.cpp
+M  tests/unit/platform/linux/test_wayland.cpp
+M  tests/unit/test_input.cpp
+A  tests/unit/test_legacy_codec_roundtrip.cpp
+A  tests/unit/test_legacy_codec_selection.cpp
+M  tests/unit/test_nvhttp_codec_flags.cpp
+M  tests/unit/test_rtsp.cpp
+M  tests/unit/test_system_tray.cpp
+M  tests/unit/test_video.cpp
+A  tests/unit/test_video_capture_groups.cpp
+M  tests/web/Configuration.test.js
+D  third-party/Simple-Web-Server
+D  third-party/TPCircularBuffer
+D  third-party/ViGEmClient
+D  third-party/build-deps
+D  third-party/glad
+D  third-party/libdisplaydevice
+D  third-party/libvirtualhid
+UD third-party/moonlight-common-c
+D  third-party/nvapi
+D  third-party/plasma-wayland-protocols
+D  third-party/tray
+D  third-party/wayland-protocols
+D  third-party/wlr-protocols
+M  uv.lock
+M  vite.config.js
+100644 9b6193d43193694ebd5b0d0b5019fb56eccfbb1d 1	.github/workflows/ci-cloudsmith.yml
+100644 f36ced9aeee23976c8c54bd7afdaf814b884b069 2	.github/workflows/ci-cloudsmith.yml
+100644 f619e0a6d3d82e66c42bb6559483b09ee071ecb5 3	.github/workflows/ci-cloudsmith.yml
+100644 630418d22ee4b784137d6cc78c6b62dc6c30d217 1	.github/workflows/ci-copr.yml
+100644 2c2942cb347d41e6ebcdde0dc3386c1372551663 2	.github/workflows/ci-copr.yml
+100644 714f5869a1fea1522cfccda03d1f30444dbba226 3	.github/workflows/ci-copr.yml
+100644 57aa492279564a62bbf079a654dadb438703dbbe 1	.github/workflows/ci-flatpak.yml
+100644 695b5bad01fbf654a3a52b6de158397a10bb1d12 2	.github/workflows/ci-flatpak.yml
+100644 dcbf1e80ec7ef3e564f483f3109806dd2aabc066 3	.github/workflows/ci-flatpak.yml
+100644 c5639103defe4b333f255aae3f7adc21185f7a9b 1	.github/workflows/ci-homebrew.yml
+100644 e6166d207baeb408f00ec357978f6130af253ac3 2	.github/workflows/ci-homebrew.yml
+100644 7f983a887b6c7f8bb31381caff6b16e5f31f4ee5 3	.github/workflows/ci-homebrew.yml
+100644 a1b25c9f94d713cfb814988c61c1a7fb1f08657e 1	.github/workflows/ci-linux.yml
+100644 fde99160c9fb3e4d2084385352fd720539ec9929 2	.github/workflows/ci-linux.yml
+100644 b23f386c7583180b4c9af557340b4c14da69f1a7 3	.github/workflows/ci-linux.yml
+100644 07ebfe927d7afedc6316362d371032a3beff27b9 1	.github/workflows/ci.yml
+100644 af37f68ccff65c63880791e2379ee079a720b78e 2	.github/workflows/ci.yml
+100644 70ce5aa20d1fadef1af7785a720a1aa00a35bf2d 3	.github/workflows/ci.yml
+100644 00416c34e86927c6d48bb31c375d9d7a1a7e50d8 1	.github/workflows/publish-artifacts.yml
+100644 3e1f2f1da2523ef08f166b346f523d637fa0f1a3 2	.github/workflows/publish-artifacts.yml
+100644 006a67160ddc961973ef639aea60a21524647525 3	.github/workflows/publish-artifacts.yml
+100644 41352019857158467afcc26bd7908c0ce76a36fd 1	.gitmodules
+100644 505a5eff760296cb8885df147adbe2664cb92540 2	.gitmodules
+100644 d1789f0e7b1cb5a9a6ecd7ae150c7370b64c039d 3	.gitmodules
+160000 94c65fd364d17b223f00a8763c9a5d94a66cb8dd 1	third-party/moonlight-common-c
+160000 fe8e924c55750faa0aab51556031d5003a367f5b 2	third-party/moonlight-common-c
+diff --cc .github/workflows/ci-cloudsmith.yml
+index f36ced9a,f619e0a6..00000000
+--- a/.github/workflows/ci-cloudsmith.yml
++++ b/.github/workflows/ci-cloudsmith.yml
+@@@ -38,7 -38,7 +38,11 @@@ jobs
+              --pattern '*.rpm'
+  
+        - name: Upload packages to Cloudsmith
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/cloudsmith_upload@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/cloudsmith_upload@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            api_key: ${{ secrets.CLOUDSMITH_API_KEY }}
+            owner: lizardbyte
+diff --cc .github/workflows/ci-copr.yml
+index 2c2942cb,714f5869..00000000
+--- a/.github/workflows/ci-copr.yml
++++ b/.github/workflows/ci-copr.yml
+@@@ -61,7 -61,7 +61,11 @@@ jobs
+          run: ls -l artifacts
+  
+        - name: Update GitHub Release
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/release_create@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/release_create@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            allowUpdates: true
+            body: ${{ github.event.release.body }}
+diff --cc .github/workflows/ci-flatpak.yml
+index 695b5bad,dcbf1e80..00000000
+--- a/.github/workflows/ci-flatpak.yml
++++ b/.github/workflows/ci-flatpak.yml
+@@@ -35,7 -35,7 +35,11 @@@ jobs
+      steps:
+        - name: More space
+          if: matrix.arch == 'x86_64'
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/more_space@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/more_space@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            analyze-space-savings: true
+            clean-all: true
+diff --cc .github/workflows/ci-homebrew.yml
+index e6166d20,7f983a88..00000000
+--- a/.github/workflows/ci-homebrew.yml
++++ b/.github/workflows/ci-homebrew.yml
+@@@ -50,7 -50,7 +50,11 @@@ jobs
+      steps:
+        - name: More space
+          if: runner.os == 'Linux' && matrix.release != true
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/more_space@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/more_space@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            analyze-space-savings: true
+            clean-all: true
+diff --cc .github/workflows/ci-linux.yml
+index fde99160,b23f386c..00000000
+--- a/.github/workflows/ci-linux.yml
++++ b/.github/workflows/ci-linux.yml
+@@@ -39,7 -39,7 +39,11 @@@ jobs
+              runner: ubuntu-22.04
+      steps:
+        - name: More space
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/more_space@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/more_space@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            analyze-space-savings: true
+            clean-all: true
+@@@ -178,10 -178,10 +182,14 @@@
+            sudo rm -rf /var/lib/apt/lists/*
+  
+        - name: Setup virtual desktop
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/virtual_desktop@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/virtual_desktop@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+  
+        - name: Setup uv
+-         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
++         uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
+          with:
+            enable-cache: true
+  
+diff --cc .github/workflows/ci.yml
+index af37f68c,70ce5aa2..00000000
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@@ -44,7 -44,7 +44,11 @@@ jobs
+  
+        - name: Release Setup
+          id: release-setup
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/release_setup@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/release_setup@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+  
+@@@ -327,7 -327,7 +331,11 @@@
+          run: ls -l artifacts
+  
+        - name: Create/Update GitHub Release
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/release_create@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/release_create@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            allowUpdates: false
+            body: ${{ needs.release-setup.outputs.release_body }}
+diff --cc .github/workflows/publish-artifacts.yml
+index 3e1f2f1d,006a6716..00000000
+--- a/.github/workflows/publish-artifacts.yml
++++ b/.github/workflows/publish-artifacts.yml
+@@@ -20,6 -20,6 +20,10 @@@ jobs
+      runs-on: ubuntu-latest
+      steps:
+        - name: Publish PR artifacts
+++<<<<<<< HEAD
+ +        uses: LizardByte/actions/actions/artifact_comment@0528b495e6af82b4d698ec6c907a9b1842622068  # v2026.1029.234422
+++=======
++         uses: LizardByte/actions/actions/artifact_comment@81873587bacc6842098865a35bbb32f2f21cee3b  # v2026.1123.33249
+++>>>>>>> upstream/master
+          with:
+            artifact_patterns: build-*
+diff --cc .gitmodules
+index 505a5eff,d1789f0e..00000000
+--- a/.gitmodules
++++ b/.gitmodules
+@@@ -25,43 -10,3 +10,46 @@@
+  	path = third-party/lizardbyte-common
+  	url = https://github.com/LizardByte/lizardbyte-common.git
+  	branch = master
+++<<<<<<< HEAD
+ +[submodule "third-party/moonlight-common-c"]
+ +	path = third-party/moonlight-common-c
+ +	url = https://github.com/mspeedo/moonlight-common-c.git
+ +	branch = master
+ +[submodule "third-party/moonlight-latency-helper"]
+ +	path = third-party/moonlight-latency-helper
+ +	url = https://github.com/mspeedo/moonlight-latency-helper.git
+ +	branch = main
+ +[submodule "third-party/nvapi"]
+ +	path = third-party/nvapi
+ +	url = https://github.com/NVIDIA/nvapi.git
+ +	branch = main
+ +[submodule "third-party/plasma-wayland-protocols"]
+ +	path = third-party/plasma-wayland-protocols
+ +	url = https://github.com/KDE/plasma-wayland-protocols.git
+ +	branch = master
+ +[submodule "third-party/Simple-Web-Server"]
+ +	path = third-party/Simple-Web-Server
+ +	url = https://github.com/LizardByte-infrastructure/Simple-Web-Server.git
+ +	branch = master
+ +[submodule "third-party/TPCircularBuffer"]
+ +	path = third-party/TPCircularBuffer
+ +	url = https://github.com/michaeltyson/TPCircularBuffer.git
+ +	branch = master
+ +[submodule "third-party/tray"]
+ +	path = third-party/tray
+ +	url = https://github.com/LizardByte/tray.git
+ +	branch = master
+ +[submodule "third-party/ViGEmClient"]
+ +	path = third-party/ViGEmClient
+ +	url = https://github.com/LizardByte/Virtual-Gamepad-Emulation-Client.git
+ +	branch = master
+ +[submodule "third-party/wayland-protocols"]
+ +	path = third-party/wayland-protocols
+ +	url = https://github.com/LizardByte-infrastructure/wayland-protocols.git
+ +	branch = main
+ +[submodule "third-party/wlr-protocols"]
+ +	path = third-party/wlr-protocols
+ +	url = https://github.com/LizardByte-infrastructure/wlr-protocols.git
+ +	branch = master
+++=======
+++>>>>>>> upstream/master
+* Unmerged path third-party/moonlight-common-c
