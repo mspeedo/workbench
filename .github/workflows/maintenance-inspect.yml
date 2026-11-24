@@ -1,0 +1,57 @@
+name: Maintenance inspection
+on:
+  push:
+    branches: [main]
+    paths: ['maintenance/request.json']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=$(jq -er '.target' maintenance/request.json)
+          case "$target" in
+            sunshine) fork=mspeedo/Sunshine; branch=development; upstream=LizardByte/Sunshine ;;
+            common-c) fork=mspeedo/moonlight-common-c; branch=master; upstream=moonlight-stream/moonlight-common-c ;;
+            moonlight) fork=mspeedo/moonlight-qt; branch=development; upstream=moonlight-stream/moonlight-qt ;;
+            *) exit 2 ;;
+          esac
+          mkdir -p "$GITHUB_WORKSPACE/maintenance-results"
+          report="$GITHUB_WORKSPACE/maintenance-results/report.txt"
+          git clone --no-tags --branch "$branch" "https://github.com/$fork.git" "$RUNNER_TEMP/repo"
+          cd "$RUNNER_TEMP/repo"
+          git remote add upstream "https://github.com/$upstream.git"
+          git fetch --no-tags upstream master
+          git config user.name maintenance-inspector
+          git config user.email maintenance-inspector@users.noreply.github.com
+          base=$(git merge-base HEAD upstream/master)
+          {
+            git rev-parse HEAD upstream/master
+            echo "Merge base: $base"
+            git log --oneline HEAD..upstream/master
+            git diff --stat "$base" upstream/master
+            git diff --stat "$base" HEAD
+            if git merge --no-commit --no-ff upstream/master; then
+              echo "Merge inspection succeeded"
+            else
+              echo "Merge inspection returned nonzero"
+            fi
+            git status --short
+            git ls-files -u
+            git diff --cc
+          } > "$report" 2>&1
+          cat "$report"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maintenance-inspection
+          path: maintenance-results/
