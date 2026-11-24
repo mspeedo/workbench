@@ -1,0 +1,54 @@
+name: Sunshine merge audit
+on:
+  push:
+    branches: [main]
+    paths: ['maintenance/sunshine-audit.json']
+permissions:
+  contents: read
+concurrency:
+  group: sunshine-merge-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect native merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/maintenance/results"
+          report="$GITHUB_WORKSPACE/maintenance/results/sunshine-audit.txt"
+          echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$report"
+          git clone --no-tags --branch development https://github.com/mspeedo/Sunshine.git "$RUNNER_TEMP/sunshine"
+          cd "$RUNNER_TEMP/sunshine"
+          git remote add upstream https://github.com/LizardByte/Sunshine.git
+          git fetch --no-tags upstream master
+          git config user.name maintenance-inspector
+          git config user.email maintenance-inspector@users.noreply.github.com
+          {
+            git rev-parse HEAD upstream/master
+            git merge-base HEAD upstream/master
+            git log --oneline HEAD..upstream/master
+            git diff --stat HEAD...upstream/master
+            git merge --no-commit --no-ff upstream/master || true
+            git status --short
+            git ls-files -u
+            git diff --cc
+          } >> "$report" 2>&1
+      - name: Publish public-source audit
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.MAINTENANCE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          p=maintenance/results/sunshine-audit.txt
+          test -f "$p"
+          sha=$(gh api "repos/mspeedo/workbench/contents/$p?ref=main" --jq .sha 2>/dev/null || true)
+          args=()
+          if [[ -n "$sha" ]]; then args+=(-f "sha=$sha"); fi
+          gh api --method PUT "repos/mspeedo/workbench/contents/$p" -f "message=Publish Sunshine merge audit $GITHUB_RUN_ID" -f branch=main -f "content=$(base64 -w0 "$p")" "${args[@]}" --jq .commit.sha
